@@ -294,30 +294,24 @@ export class BybitService {
         try {
             const side: OrderSideV5 = signalCandle.isGreen ? 'Sell' : 'Buy';
             
-            // Для лонга (красная сигнальная свеча):
-            // - если лой текущей свечи ниже лоя сигнальной, берем лой текущей
-            // - если лой сигнальной ниже, берем её лой
-            // Для шорта (зеленая сигнальная свеча):
-            // - если хай текущей свечи выше хая сигнальной, берем хай текущей
-            // - если хай сигнальной выше, берем её хай
             const stopLossLevel = side === 'Buy' ? 
-                Math.min(signalCandle.low, currentCandle.low) :    // Для лонга берем самый низкий лой
-                Math.max(signalCandle.high, currentCandle.high);   // Для шорта берем самый высокий хай
+                Math.min(signalCandle.low, currentCandle.low) :    
+                Math.max(signalCandle.high, currentCandle.high);   
 
             const stopLoss = side === 'Buy' ? 
-                stopLossLevel - this.STOP_LOSS_POINTS :   // Для лонга стоп ниже минимума
-                stopLossLevel + this.STOP_LOSS_POINTS;    // Для шорта стоп выше максимума
+                stopLossLevel - this.STOP_LOSS_POINTS :   
+                stopLossLevel + this.STOP_LOSS_POINTS;    
 
             const takeProfit = currentCandle.close + (side === 'Buy' ? 
                 this.TAKE_PROFIT_POINTS : 
                 -this.TAKE_PROFIT_POINTS);
 
-            // Конвертируем размер позиции из USD в контракты
             const contractSize = (this.TRADE_SIZE_USD / currentCandle.close).toFixed(3);
+            const orderPrice = currentCandle.close.toString(); // Цена для лимитного ордера
 
-            logger.info(`🎯 Попытка открытия позиции:`);
+            logger.info(`🎯 Попытка открытия позиции (Лимитный ордер PostOnly):`);
             logger.info(`📈 Направление: ${side} (сигнальная свеча ${signalCandle.isGreen ? 'зеленая' : 'красная'})`);
-            logger.info(`💰 Цена входа: ${currentCandle.close}`);
+            logger.info(`💰 Цена ордера: ${orderPrice}`);
             logger.info(`🎯 Тейк-профит: ${takeProfit}`);
             logger.info(`🛑 Стоп-лосс: ${stopLoss}`);
             logger.info(`📊 Экстремумы свечей:`);
@@ -331,20 +325,21 @@ export class BybitService {
                 category: 'linear',
                 symbol: this.SYMBOL,
                 side: side,
-                orderType: 'Market',
+                orderType: 'Limit', // Изменено на Limit
                 qty: contractSize,
-                timeInForce: 'GTC'
+                price: orderPrice, // Указана цена для лимитного ордера
+                timeInForce: 'PostOnly', // Ордер будет исполнен только как maker
             });
 
-            logger.info(`📡 Ответ от API при открытии позиции:`, response);
+            logger.info(`📡 Ответ от API при открытии лимитной PostOnly позиции:`, response);
 
-            if (response.retCode === 0) {
-                logger.info(`✅ Позиция успешно открыта, устанавливаю стоп-лосс и тейк-профит`);
+            if (response.retCode === 0 && response.result && response.result.orderId) {
+                logger.info(`✅ Лимитный ордер PostOnly успешно размещен (orderId: ${response.result.orderId}). Предполагаемая цена входа: ${currentCandle.close}`);
+                logger.info(`🕒 Устанавливаю стоп-лосс и тейк-профит`);
                 
-                // Сохраняем информацию об открытой позиции
                 this.activePosition = {
                     side: side,
-                    entryPrice: currentCandle.close,
+                    entryPrice: currentCandle.close, // Используем цену ордера как предполагаемую цену входа
                     entryTime: currentCandle.timestamp,
                     isTrailingActive: false,
                     lastTrailingStopPrice: null
@@ -360,17 +355,17 @@ export class BybitService {
                     slTriggerBy: 'MarkPrice'
                 });
 
-                // Запускаем интервал проверки трейлинг-стопа
                 this.startTrailingStopCheck();
 
-                const message = this.formatTradeAlert(side, currentCandle.close, takeProfit, stopLoss, signalCandle, currentCandle);
+                const message = this.formatTradeAlert(side, currentCandle.close, takeProfit, stopLoss, signalCandle, currentCandle, true);
                 this.onTradeOpen(message);
-                logger.info(`✅ Сделка полностью оформлена и уведомление отправлено`);
+                logger.info(`✅ Сделка (лимитный ордер) полностью оформлена и уведомление отправлено`);
             } else {
-                logger.error(`❌ Ошибка при открытии позиции, код: ${response.retCode}, сообщение: ${response.retMsg}`);
+                logger.error(`❌ Лимитный ордер PostOnly не был размещен или был отменен. Код: ${response.retCode}, сообщение: ${response.retMsg}`);
+                // Позиция не открыта, никаких дальнейших действий не требуется
             }
         } catch (error) {
-            logger.error('❌ Ошибка при открытии позиции:', error);
+            logger.error('❌ Ошибка при открытии лимитной позиции:', error);
             if (error instanceof Error) {
                 logger.error('Детали ошибки:', error.message);
                 logger.error('Стек ошибки:', error.stack);
@@ -378,15 +373,15 @@ export class BybitService {
         }
     }
 
-    private formatTradeAlert(side: OrderSideV5, entry: number, takeProfit: number, stopLoss: number, signalCandle: Candle, currentCandle: Candle): string {
+    private formatTradeAlert(side: OrderSideV5, entry: number, takeProfit: number, stopLoss: number, signalCandle: Candle, currentCandle: Candle, isLimitOrder: boolean = false): string {
         const contractSize = (this.TRADE_SIZE_USD / entry).toFixed(3);
         const stopLossLevel = signalCandle.isGreen ? 
             Math.max(signalCandle.high, currentCandle.high) :
             Math.min(signalCandle.low, currentCandle.low);
             
-        return `🎯 ОТКРЫТА НОВАЯ СДЕЛКА ${this.SYMBOL}\n\n` +
+        return `🎯 ${isLimitOrder ? 'ЛИМИТНЫЙ ОРДЕР РАЗМЕЩЕН' : 'ОТКРЫТА НОВАЯ СДЕЛКА'} ${this.SYMBOL}\n\n` +
                `${side === 'Buy' ? '📈 ЛОНГ' : '📉 ШОРТ'}\n` +
-               `💵 Цена входа: ${entry}\n` +
+               `💵 ${isLimitOrder ? 'Цена ордера' : 'Цена входа'}: ${entry}\n` +
                `🎯 Тейк-профит: ${takeProfit}\n` +
                `🛑 Стоп-лосс: ${stopLoss}\n` +
                `📊 Расчет стопа:\n` +
