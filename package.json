@@ -1,19 +1,39 @@
 {
   "name": "vsabot",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "dist/index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts"
   },
   "author": "",
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "@types/node": "^22.15.21",
+    "@types/node": "^22.15.24",
+    "@types/node-telegram-bot-api": "^0.64.8",
     "axios": "^1.9.0",
-    "bybit-api": "^4.1.8",
+    "bybit-api": "^4.1.9",
     "crypto-js": "^4.2.0",
     "dotenv": "^16.5.0",
+    "node-telegram-bot-api": "^0.66.0",
+    "typescript": "^5.8.3",
     "winston": "^3.17.0"
-  }
+  },
+  "devDependencies": {
+    "@types/node-telegram-bot-api": "^0.64.0",
+    "typescript": "^5.0.0",
+    "ts-node": "^10.9.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Pulzze92/SPIKE_VSA.git"
+  },
+  "keywords": [],
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Pulzze92/SPIKE_VSA/issues"
+  },
+  "homepage": "https://github.com/Pulzze92/SPIKE_VSA#readme"
 }
