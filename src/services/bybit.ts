@@ -22,7 +22,7 @@ export class BybitService {
     private wsClient: WebsocketClient;
     private readonly client: RestClientV5;
     private readonly SYMBOL = 'BTCUSDT';
-    private readonly TRADE_SIZE = 20000;
+    private readonly TRADE_SIZE = 10000;
     private readonly TAKE_PROFIT_POINTS = 300;
     private readonly STOP_LOSS_POINTS = 300;
     private candleHistory: Candle[] = [];
@@ -156,9 +156,10 @@ export class BybitService {
         logger.info(`📈 Current volume: ${currentCandle.volume.toFixed(2)}`);
         
         if (previousCandle) {
+            const volumeRatio = currentCandle.volume / previousCandle.volume;
             logger.info(`📊 Previous volume: ${previousCandle.volume.toFixed(2)}`);
-            logger.info(`🎯 Required volume for signal: ${requiredVolume.toFixed(2)}`);
-            logger.info(`📉 Remaining to signal: ${Math.max(0, requiredVolume - currentCandle.volume).toFixed(2)}`);
+            logger.info(`📊 Current volume ratio: ${volumeRatio.toFixed(2)}x (goal: ${this.volumeMultiplier}x)`);
+            logger.info(`🎯 Need to increase volume by ${Math.max(0, this.volumeMultiplier - volumeRatio).toFixed(2)}x`);
         }
 
         if (this.currentSignal?.isActive) {
