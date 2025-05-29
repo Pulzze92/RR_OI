@@ -166,6 +166,21 @@ export class TradingLogicService {
             return;
         }
         try {
+            // Проверяем баланс перед открытием позиции
+            const balanceResponse = await this.client.getWalletBalance({ accountType: 'UNIFIED' });
+            if (balanceResponse.retCode === 0 && balanceResponse.result?.list?.[0]?.coin) {
+                const usdtBalance = balanceResponse.result.list[0].coin.find(c => c.coin === 'USDT');
+                if (usdtBalance) {
+                    const availableBalance = Number(usdtBalance.availableToWithdraw);
+                    logger.info(`💰 Доступный баланс USDT: ${availableBalance.toFixed(2)}, Требуется для позиции: ${this.TRADE_SIZE_USD}`);
+                    
+                    if (availableBalance < this.TRADE_SIZE_USD) {
+                        logger.error(`❌ Недостаточно средств! Доступно: ${availableBalance.toFixed(2)} USDT, требуется: ${this.TRADE_SIZE_USD} USDT`);
+                        return;
+                    }
+                }
+            }
+
             const side: OrderSideV5 = signalCandle.isGreen ? 'Sell' : 'Buy';
             
             const stopLossLevel = side === 'Buy' ? 
@@ -185,6 +200,7 @@ export class TradingLogicService {
 
             logger.info(`🎯 Попытка открытия позиции (Лимитный ордер PostOnly):`);
             logger.info(`📈 Направление: ${side}, Цена ордера: ${orderPrice}, ТП: ${takeProfit}, СЛ: ${stopLoss}`);
+            logger.info(`📊 Размер контракта: ${contractSize} BTC (${this.TRADE_SIZE_USD} USD)`);
 
             const response = await this.client.submitOrder({
                 category: 'linear',
@@ -228,6 +244,9 @@ export class TradingLogicService {
                 logger.info(`✅ Сделка (лимитный ордер) полностью оформлена и уведомление отправлено`);
             } else {
                 logger.error(`❌ Лимитный ордер PostOnly не был размещен. Код: ${response.retCode}, сообщение: ${response.retMsg}`);
+                if (response.retCode === 110007) {
+                    logger.error(`💡 Рекомендация: Пополните счет или уменьшите размер позиции TRADE_SIZE_USD в настройках`);
+                }
             }
         } catch (error) {
             logger.error('❌ Ошибка при открытии лимитной позиции:', error);
