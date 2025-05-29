@@ -118,32 +118,45 @@ export class TradingLogicService {
     }
 
     public processCompletedCandle(completedCandle: Candle, candleHistory: Candle[]): void {
+        logger.info(`[TradingLogic] processCompletedCandle вызван для свечи: ${new Date(completedCandle.timestamp).toLocaleTimeString()}, V=${completedCandle.volume.toFixed(2)}, Confirmed: ${completedCandle.confirmed}`);
+        logger.info(`[TradingLogic] Текущий сигнал: ${this.currentSignal ? `Активен, время: ${new Date(this.currentSignal.candle.timestamp).toLocaleTimeString()}, V=${this.currentSignal.candle.volume.toFixed(2)}` : 'НЕТ АКТИВНОГО СИГНАЛА'}`);
+
         if (!this.currentSignal?.isActive || !this.currentSignal.waitingForLowerVolume) {
+            logger.info('[TradingLogic] Сигнал неактивен или не ожидаем свечу с меньшим объемом. Выход.');
             return;
         }
 
         if (completedCandle.timestamp === this.currentSignal.candle.timestamp) {
+            logger.info('[TradingLogic] Завершенная свеча является сигнальной. Пропускаем.');
             return;
         }
         
-        const signalCandleIndex = candleHistory.findIndex(c => c.timestamp === this.currentSignal!.candle.timestamp);
-        const completedCandleIndex = candleHistory.findIndex(c => c.timestamp === completedCandle.timestamp);
+        logger.info(`[TradingLogic] Ищем сигнальную свечу (${new Date(this.currentSignal.candle.timestamp).toLocaleTimeString()}) и завершенную (${new Date(completedCandle.timestamp).toLocaleTimeString()}) в истории (размер: ${candleHistory.length})`);
+        const signalCandleFromHistory = candleHistory.find(c => c.timestamp === this.currentSignal!.candle.timestamp);
+        const completedCandleFromHistory = candleHistory.find(c => c.timestamp === completedCandle.timestamp);
 
-        if (signalCandleIndex === -1 || completedCandleIndex === -1) {
-            logger.warn("Не удалось найти сигнальную или завершенную свечу в истории для обработки.");
-            this.resetSignal();
+        if (!signalCandleFromHistory || !completedCandleFromHistory) {
+            logger.warn("[TradingLogic] Не удалось найти сигнальную или завершенную свечу в переданной истории.");
+            // Логируем содержимое истории для отладки, если она не слишком большая
+            if (candleHistory.length < 10) {
+                logger.debug("[TradingLogic] Содержимое candleHistory:", JSON.stringify(candleHistory.map(c => ({t: new Date(c.timestamp).toLocaleTimeString(), v:c.volume, conf: c.confirmed}))));
+            }
+            this.resetSignal(); // Возможно, стоит пересмотреть, нужно ли сбрасывать сигнал в этом случае или ждать дальше
             return;
         }
+        logger.info(`[TradingLogic] Сигнальная свеча найдена в истории: V=${signalCandleFromHistory.volume.toFixed(2)}. Завершенная свеча найдена: V=${completedCandleFromHistory.volume.toFixed(2)}`);
 
 
         if (completedCandle.volume <= this.currentSignal.candle.volume) {
-            logger.info(`✅ Условие для входа выполнено: объем текущей свечи (${completedCandle.volume.toFixed(2)}) <= объема сигнальной (${this.currentSignal.candle.volume.toFixed(2)})`);
+            logger.info(`✅ [TradingLogic] Условие для входа выполнено: объем текущей свечи (${completedCandle.volume.toFixed(2)}) <= объема сигнальной (${this.currentSignal.candle.volume.toFixed(2)})`);
             this.openPosition(this.currentSignal.candle, completedCandle);
+            // Сбрасываем сигнал только ПОСЛЕ успешной попытки открытия (или если она не удалась, но решение принято)
             this.currentSignal.isActive = false; 
             this.currentSignal.waitingForLowerVolume = false;
+            logger.info('[TradingLogic] Сигнал деактивирован после попытки входа.');
         } else {
-            logger.info(`❌ Условие для входа НЕ выполнено: объем текущей свечи (${completedCandle.volume.toFixed(2)}) > объема сигнальной (${this.currentSignal.candle.volume.toFixed(2)})`);
-            logger.info(`🕯️ Ожидаем следующую свечу... Сигнал остается активным.`);
+            logger.info(`❌ [TradingLogic] Условие для входа НЕ выполнено: объем текущей свечи (${completedCandle.volume.toFixed(2)}) > объема сигнальной (${this.currentSignal.candle.volume.toFixed(2)})`);
+            logger.info(`🕯️ [TradingLogic] Ожидаем следующую свечу... Сигнал остается активным.`);
         }
     }
 

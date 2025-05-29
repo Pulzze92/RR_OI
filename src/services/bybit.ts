@@ -14,17 +14,17 @@ export class BybitService {
     private readonly apiSecret: string;
 
     private readonly SYMBOL = 'BTCUSDT';
-    private readonly CANDLE_INTERVAL: string = '15';
-    private readonly CANDLE_HISTORY_SIZE = 100; 
-    private readonly INITIAL_HISTORY_HOURS = 4; 
-    private readonly LOG_INTERVAL = 5 * 60 * 1000; 
+    private readonly CANDLE_INTERVAL: string = '60';
+    private readonly CANDLE_HISTORY_SIZE = 4;
+    private readonly INITIAL_HISTORY_HOURS = 12;
+    private readonly LOG_INTERVAL = 15 * 60 * 1000;
 
-    private readonly TRADE_SIZE_USD = 15000;
-    private readonly TAKE_PROFIT_POINTS = 150;
-    private readonly STOP_LOSS_POINTS = 170;
-    private readonly TRAILING_ACTIVATION_POINTS = 140;
-    private readonly TRAILING_DISTANCE = 50;
-    private readonly VOLUME_THRESHOLD = 2000;
+    private readonly TRADE_SIZE_USD = 10000;
+    private readonly TAKE_PROFIT_POINTS = 800;
+    private readonly STOP_LOSS_POINTS = 450;
+    private readonly TRAILING_ACTIVATION_POINTS = 200;
+    private readonly TRAILING_DISTANCE = 200;
+    private readonly VOLUME_THRESHOLD = 3000;
     private VOLUME_MULTIPLIER: number = 4;
 
     private onTradeUpdate: (message: string) => void;
@@ -82,7 +82,7 @@ export class BybitService {
                                `📊 Торговая пара: ${this.SYMBOL}\n` +
                                `💰 Размер позиции: $${this.TRADE_SIZE_USD}\n` +
                                `📈 Множитель объема: ${this.VOLUME_MULTIPLIER}x\n` +
-                               `⏱️ Таймфрейм: ${this.CANDLE_INTERVAL}m\n` +
+                               `⏱️ Таймфрейм: ${this.CANDLE_INTERVAL}h\n` +
                                `📥 Загружено свечей: ${this.candleHistory.length}`;
             this.onTradeUpdate(startMessage);
             logger.info('Сервис Bybit инициализирован, подписан на обновления свечей и стартовое сообщение отправлено.');
