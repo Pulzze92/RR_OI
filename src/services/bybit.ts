@@ -16,10 +16,10 @@ export class BybitService {
     private wsClient!: WebsocketClient;
     private readonly client: RestClientV5;
     private readonly SYMBOL = 'BTCUSDT';
-    private readonly TRADE_SIZE_USD = 10000;
+    private readonly TRADE_SIZE_USD = 15000;
     private readonly TAKE_PROFIT_POINTS = 150;
     private readonly STOP_LOSS_POINTS = 170;
-    private readonly TRAILING_ACTIVATION_POINTS = 150;  // Активация трейлинга при прибыли 150 пунктов
+    private readonly TRAILING_ACTIVATION_POINTS = 140;  // Изменено для активации до ТП (было 150)
     private readonly TRAILING_DISTANCE = 50;           // Расстояние трейлинга от цены
     private candleHistory: Candle[] = [];
     private currentSignal: VolumeSignal | null = null;
@@ -608,6 +608,7 @@ export class BybitService {
                                     takeProfit: '0',
                                     stopLoss: newStopPrice.toString(),
                                     positionIdx: 0,
+                                    tpTriggerBy: 'MarkPrice',
                                     slTriggerBy: 'MarkPrice'
                                 });
                                 this.activePosition.isTrailingActive = true;
@@ -630,7 +631,7 @@ export class BybitService {
             } catch (error) {
                 logger.error('❌ Ошибка при обновлении трейлинг-стопа:', error);
             }
-        }, 10000); // Проверка каждые 10 секунд
+        }, 3000);
     }
 
     private stopTrailingStopCheck(): void {

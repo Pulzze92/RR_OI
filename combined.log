@@ -6410,3 +6410,21 @@
 {"level":"info","message":"✅ Получено подтверждение свечи 5:00:00 PM","timestamp":"2025-05-29T15:14:57.266Z"}
 {"level":"info","message":"🎯 Активация трейлинг-стопа! Отменяем тейк-профит","timestamp":"2025-05-29T15:20:10.398Z"}
 {"level":"info","message":"📈 Трейлинг-стоп передвинут: 107430.1 (50 пунктов от цены 107380.1)","timestamp":"2025-05-29T15:20:10.612Z"}
+{"level":"info","message":"📥 Загружаем начальную историю свечей для BTCUSDT","timestamp":"2025-05-29T16:48:39.662Z"}
+{"level":"info","message":"✅ Загружено 4 исторических свечей","timestamp":"2025-05-29T16:48:40.046Z"}
+{"level":"info","message":"📊 Последние свечи:","timestamp":"2025-05-29T16:48:40.047Z"}
+{"level":"info","message":"Предыдущая (6:30:00 PM): объем 908.34","timestamp":"2025-05-29T16:48:40.059Z"}
+{"level":"info","message":"Текущая (6:45:00 PM): объем 568.91","timestamp":"2025-05-29T16:48:40.059Z"}
+{"level":"info","message":"✅ Подписка на BTCUSDT активирована","timestamp":"2025-05-29T16:48:40.062Z"}
+{"level":"info","message":"Bot started successfully","timestamp":"2025-05-29T16:48:40.064Z"}
+{"level":"info","message":"Message sent to Telegram","timestamp":"2025-05-29T16:48:40.255Z"}
+{"level":"info","message":"Trade opened and notification sent","timestamp":"2025-05-29T16:48:40.255Z"}
+{"level":"info","message":"📥 Загружаем начальную историю свечей для BTCUSDT","timestamp":"2025-05-29T16:50:30.611Z"}
+{"level":"info","message":"✅ Загружено 4 исторических свечей","timestamp":"2025-05-29T16:50:30.983Z"}
+{"level":"info","message":"📊 Последние свечи:","timestamp":"2025-05-29T16:50:30.984Z"}
+{"level":"info","message":"Предыдущая (6:30:00 PM): объем 908.34","timestamp":"2025-05-29T16:50:30.995Z"}
+{"level":"info","message":"Текущая (6:45:00 PM): объем 697.32","timestamp":"2025-05-29T16:50:30.995Z"}
+{"level":"info","message":"✅ Подписка на BTCUSDT активирована","timestamp":"2025-05-29T16:50:30.998Z"}
+{"level":"info","message":"Bot started successfully","timestamp":"2025-05-29T16:50:31.000Z"}
+{"level":"info","message":"Message sent to Telegram","timestamp":"2025-05-29T16:50:31.192Z"}
+{"level":"info","message":"Trade opened and notification sent","timestamp":"2025-05-29T16:50:31.192Z"}
