@@ -22,7 +22,7 @@ export class BybitService {
     private wsClient: WebsocketClient;
     private readonly client: RestClientV5;
     private readonly SYMBOL = 'BTCUSDT';
-    private readonly TRADE_SIZE = 1000;
+    private readonly TRADE_SIZE = 20000;
     private readonly TAKE_PROFIT_POINTS = 300;
     private readonly STOP_LOSS_POINTS = 300;
     private candleHistory: Candle[] = [];
