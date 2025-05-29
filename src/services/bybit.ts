@@ -31,7 +31,7 @@ export class BybitService {
     private readonly apiKey: string;
     private readonly apiSecret: string;
     private lastLogTime: number = 0;
-    private readonly LOG_INTERVAL = 5 * 60 * 1000; // 5 минут в миллисекундах
+    private readonly LOG_INTERVAL = 5 * 60 * 1000;
 
     constructor(
         apiKey: string,
@@ -150,21 +150,21 @@ export class BybitService {
         const previousCandle = this.candleHistory[this.candleHistory.length - 2];
         const requiredVolume = previousCandle ? previousCandle.volume * this.volumeMultiplier : 0;
         
-        logger.info('📊 СТАТУС МОНИТОРИНГА:');
-        logger.info(`🕒 Время: ${new Date().toLocaleTimeString()}`);
-        logger.info(`💰 Текущая цена: $${currentCandle.close}`);
-        logger.info(`📈 Текущий объем: ${currentCandle.volume.toFixed(2)}`);
+        logger.info('📊 MONITORING STATUS:');
+        logger.info(`🕒 Time: ${new Date().toLocaleTimeString()}`);
+        logger.info(`💰 Current price: $${currentCandle.close}`);
+        logger.info(`📈 Current volume: ${currentCandle.volume.toFixed(2)}`);
         
         if (previousCandle) {
-            logger.info(`📊 Предыдущий объем: ${previousCandle.volume.toFixed(2)}`);
-            logger.info(`🎯 Требуемый объем для сигнала: ${requiredVolume.toFixed(2)}`);
-            logger.info(`📉 До сигнала осталось: ${Math.max(0, requiredVolume - currentCandle.volume).toFixed(2)}`);
+            logger.info(`📊 Previous volume: ${previousCandle.volume.toFixed(2)}`);
+            logger.info(`🎯 Required volume for signal: ${requiredVolume.toFixed(2)}`);
+            logger.info(`📉 Remaining to signal: ${Math.max(0, requiredVolume - currentCandle.volume).toFixed(2)}`);
         }
 
         if (this.currentSignal?.isActive) {
-            logger.info('⚠️ АКТИВНЫЙ СИГНАЛ:');
-            logger.info(`📊 Объем сигнальной свечи: ${this.currentSignal.candle.volume.toFixed(2)}`);
-            logger.info(`🎯 Ожидаем свечу с меньшим объемом для входа в позицию`);
+            logger.info('⚠️ ACTIVE SIGNAL:');
+            logger.info(`📊 Signal candle volume: ${this.currentSignal.candle.volume.toFixed(2)}`);
+            logger.info(`🎯 Waiting for lower volume candle to enter position`);
         }
 
         logger.info('➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖');
@@ -242,24 +242,24 @@ export class BybitService {
     }
 
     private formatVolumeAlert(currentCandle: Candle, previousCandle: Candle): string {
-        return `🔍 ОБНАРУЖЕНО АНОМАЛЬНОЕ УВЕЛИЧЕНИЕ ОБЪЕМА ${this.SYMBOL}:\n\n` +
-               `📊 Текущий объем: ${currentCandle.volume.toFixed(2)}\n` +
-               `📈 Предыдущий объем: ${previousCandle.volume.toFixed(2)}\n` +
-               `💹 Увеличение: ${((currentCandle.volume - previousCandle.volume) / previousCandle.volume * 100).toFixed(2)}%\n` +
-               `${currentCandle.isGreen ? '🟢' : '🔴'} Цвет свечи: ${currentCandle.isGreen ? 'ЗЕЛЕНЫЙ' : 'КРАСНЫЙ'}\n` +
-               `📉 Движение цены: ${((currentCandle.close - currentCandle.open) / currentCandle.open * 100).toFixed(2)}%\n` +
-               `💰 Текущая цена: ${currentCandle.close}`;
+        return `🔍 ANOMALOUS INCREASE IN VOLUME DETECTED FOR ${this.SYMBOL}:\n\n` +
+               `📊 Current volume: ${currentCandle.volume.toFixed(2)}\n` +
+               `📈 Previous volume: ${previousCandle.volume.toFixed(2)}\n` +
+               `💹 Candle trend: ${((currentCandle.volume - previousCandle.volume) / previousCandle.volume * 100).toFixed(2)}%\n` +
+               `${currentCandle.isGreen ? '🟢' : '🔴'} Candle color: ${currentCandle.isGreen ? 'GREEN' : 'RED'}\n` +
+               `📉 Price direction: ${((currentCandle.close - currentCandle.open) / currentCandle.open * 100).toFixed(2)}%\n` +
+               `💰 Current price: ${currentCandle.close}`;
     }
 
     private formatTradeAlert(side: OrderSideV5, entry: number, takeProfit: number, stopLoss: number): string {
-        return `🎯 ОТКРЫТА НОВАЯ СДЕЛКА ${this.SYMBOL}\n\n` +
-               `${side === 'Buy' ? '📈 ЛОНГ' : '📉 ШОРТ'}\n` +
-               `💵 Цена входа: ${entry}\n` +
-               `🎯 Тейк-профит: ${takeProfit}\n` +
-               `🛑 Стоп-лосс: ${stopLoss}\n` +
-               `💰 Размер позиции: $${this.TRADE_SIZE}\n` +
-               `📊 Потенциальная прибыль: $${((Math.abs(takeProfit - entry) / entry) * this.TRADE_SIZE).toFixed(2)}\n` +
-               `⚠️ Максимальный убыток: $${((Math.abs(stopLoss - entry) / entry) * this.TRADE_SIZE).toFixed(2)}`;
+        return `🎯 NEW TRADE OPENED FOR ${this.SYMBOL}\n\n` +
+               `${side === 'Buy' ? '📈 LONG' : '📉 SHORT'}\n` +
+               `💵 Entry price: ${entry}\n` +
+               `🎯 Take-profit: ${takeProfit}\n` +
+               `🛑 Stop-loss: ${stopLoss}\n` +
+               `💰 Position size: $${this.TRADE_SIZE}\n` +
+               `📊 Potential profit: $${((Math.abs(takeProfit - entry) / entry) * this.TRADE_SIZE).toFixed(2)}\n` +
+               `⚠️ Maximum loss: $${((Math.abs(stopLoss - entry) / entry) * this.TRADE_SIZE).toFixed(2)}`;
     }
 
     public onVolumeSpike: (message: string) => void = () => {};
@@ -268,11 +268,11 @@ export class BybitService {
     public async subscribeToSymbol(): Promise<void> {
         try {
             await this.wsClient.subscribeV5([`kline.15.${this.SYMBOL}`], 'linear');
-            const startMessage = `🤖 БОТ ЗАПУЩЕН\n\n` +
-                               `📊 Торговая пара: ${this.SYMBOL}\n` +
-                               `💰 Размер позиции: $${this.TRADE_SIZE}\n` +
-                               `📈 Множитель объема: ${this.volumeMultiplier}x\n` +
-                               `⏱️ Таймфрейм: 15m`;
+            const startMessage = `🤖 BOT STARTED\n\n` +
+                               `📊 Trading pair: ${this.SYMBOL}\n` +
+                               `💰 Position size: $${this.TRADE_SIZE}\n` +
+                               `📈 Volume multiplier: ${this.volumeMultiplier}x\n` +
+                               `⏱️ Timeframe: 15m`;
             this.onTradeOpen(startMessage);
             logger.info(`Subscribed to ${this.SYMBOL} klines`);
         } catch (error) {
