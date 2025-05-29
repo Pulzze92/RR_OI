@@ -25,7 +25,7 @@ export class BybitService {
     private readonly TRAILING_ACTIVATION_POINTS = 200;
     private readonly TRAILING_DISTANCE = 200;
     private readonly VOLUME_THRESHOLD = 3000;
-    private VOLUME_MULTIPLIER: number = 4;
+    private VOLUME_MULTIPLIER: number = 3;
 
     private onTradeUpdate: (message: string) => void;
     private onSignalUpdate: (message: string) => void;

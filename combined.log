@@ -93,3 +93,4 @@
 {"level":"info","message":"[TradingLogic] processCompletedCandle вызван для свечи: 9:00:00 PM, V=3010.46, Confirmed: true","timestamp":"2025-05-29T19:14:57.571Z"}
 {"level":"info","message":"[TradingLogic] Текущий сигнал: Активен, время: 9:00:00 PM, V=3010.46","timestamp":"2025-05-29T19:14:57.571Z"}
 {"level":"info","message":"[TradingLogic] Завершенная свеча является сигнальной. Пропускаем.","timestamp":"2025-05-29T19:14:57.571Z"}
+{"level":"info","message":"Текущий объем формирующейся свечи (9:15:00 PM): 694.41, Закрытие: 105727","timestamp":"2025-05-29T19:19:37.571Z"}
