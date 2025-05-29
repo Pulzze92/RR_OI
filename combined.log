@@ -146,3 +146,97 @@
 {"level":"info","message":"🎯 Требуемый объем для сигнала: 1454.70","timestamp":"2025-05-29T10:31:50.935Z"}
 {"level":"info","message":"📉 До сигнала осталось: 1405.96","timestamp":"2025-05-29T10:31:50.935Z"}
 {"level":"info","message":"➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖","timestamp":"2025-05-29T10:31:50.935Z"}
+{"level":"info","message":"Subscribed to BTCUSDT klines","timestamp":"2025-05-29T10:35:11.205Z"}
+{"level":"info","message":"Bot started successfully","timestamp":"2025-05-29T10:35:11.237Z"}
+{"level":"info","message":"Message sent to Telegram","timestamp":"2025-05-29T10:35:11.509Z"}
+{"level":"info","message":"Trade opened and notification sent","timestamp":"2025-05-29T10:35:11.510Z"}
+{"level":"info","message":"📊 MONITORING STATUS:","timestamp":"2025-05-29T10:35:12.200Z"}
+{"level":"info","message":"🕒 Time: 12:35:12 PM","timestamp":"2025-05-29T10:35:12.213Z"}
+{"level":"info","message":"💰 Current price: $108525","timestamp":"2025-05-29T10:35:12.213Z"}
+{"level":"info","message":"📈 Current volume: 203.54","timestamp":"2025-05-29T10:35:12.213Z"}
+{"level":"info","message":"➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖","timestamp":"2025-05-29T10:35:12.213Z"}
+{"level":"info","message":"📊 MONITORING STATUS:","timestamp":"2025-05-29T10:40:12.936Z"}
+{"level":"info","message":"🕒 Time: 12:40:12 PM","timestamp":"2025-05-29T10:40:12.937Z"}
+{"level":"info","message":"💰 Current price: $108459","timestamp":"2025-05-29T10:40:12.937Z"}
+{"level":"info","message":"📈 Current volume: 330.55","timestamp":"2025-05-29T10:40:12.937Z"}
+{"level":"info","message":"➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖","timestamp":"2025-05-29T10:40:12.937Z"}
+{"level":"info","message":"📊 MONITORING STATUS:","timestamp":"2025-05-29T10:45:12.940Z"}
+{"level":"info","message":"🕒 Time: 12:45:12 PM","timestamp":"2025-05-29T10:45:12.940Z"}
+{"level":"info","message":"💰 Current price: $108489.1","timestamp":"2025-05-29T10:45:12.940Z"}
+{"level":"info","message":"📈 Current volume: 1.86","timestamp":"2025-05-29T10:45:12.940Z"}
+{"level":"info","message":"📊 Previous volume: 388.52","timestamp":"2025-05-29T10:45:12.940Z"}
+{"level":"info","message":"📊 Current volume ratio: 0.00x (goal: 4x)","timestamp":"2025-05-29T10:45:12.940Z"}
+{"level":"info","message":"🎯 Need to increase volume by 4.00x","timestamp":"2025-05-29T10:45:12.940Z"}
+{"level":"info","message":"➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖","timestamp":"2025-05-29T10:45:12.940Z"}
+{"level":"info","message":"Subscribed to BTCUSDT klines","timestamp":"2025-05-29T10:47:26.359Z"}
+{"level":"info","message":"Bot started successfully","timestamp":"2025-05-29T10:47:26.393Z"}
+{"level":"info","message":"Message sent to Telegram","timestamp":"2025-05-29T10:47:26.619Z"}
+{"level":"info","message":"Trade opened and notification sent","timestamp":"2025-05-29T10:47:26.620Z"}
+{"level":"info","message":"📊 СТАТУС МОНИТОРИНГА:","timestamp":"2025-05-29T10:47:27.373Z"}
+{"level":"info","message":"🕒 Время: 12:47:27 PM","timestamp":"2025-05-29T10:47:27.385Z"}
+{"level":"info","message":"💰 Текущая цена: $108616.8","timestamp":"2025-05-29T10:47:27.385Z"}
+{"level":"info","message":"📈 Текущий объем: 154.13","timestamp":"2025-05-29T10:47:27.385Z"}
+{"level":"info","message":"⚠️ Ожидаем данные предыдущей свечи для сравнения объемов","timestamp":"2025-05-29T10:47:27.385Z"}
+{"level":"info","message":"➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖","timestamp":"2025-05-29T10:47:27.385Z"}
+{"level":"info","message":"Subscribed to BTCUSDT klines","timestamp":"2025-05-29T10:48:50.218Z"}
+{"level":"info","message":"Bot started successfully","timestamp":"2025-05-29T10:48:50.251Z"}
+{"level":"info","message":"Message sent to Telegram","timestamp":"2025-05-29T10:48:50.496Z"}
+{"level":"info","message":"Trade opened and notification sent","timestamp":"2025-05-29T10:48:50.496Z"}
+{"level":"info","message":"📊 СТАТУС МОНИТОРИНГА:","timestamp":"2025-05-29T10:48:51.142Z"}
+{"level":"info","message":"🕒 Время: 12:48:51 PM","timestamp":"2025-05-29T10:48:51.155Z"}
+{"level":"info","message":"💰 Текущая цена: $108587.3","timestamp":"2025-05-29T10:48:51.155Z"}
+{"level":"info","message":"📈 Текущий объем: 198.58","timestamp":"2025-05-29T10:48:51.155Z"}
+{"level":"info","message":"📊 Предыдущий объем: 198.58","timestamp":"2025-05-29T10:48:51.155Z"}
+{"level":"info","message":"📊 Текущее соотношение объемов: 1.00x (цель: 4x)","timestamp":"2025-05-29T10:48:51.155Z"}
+{"level":"info","message":"🎯 Нужно увеличение объема еще в 3.00x раз","timestamp":"2025-05-29T10:48:51.156Z"}
+{"level":"info","message":"🔒 Свеча подтверждена: Нет","timestamp":"2025-05-29T10:48:51.156Z"}
+{"level":"info","message":"➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖","timestamp":"2025-05-29T10:48:51.156Z"}
+{"level":"info","message":"Subscribed to BTCUSDT klines","timestamp":"2025-05-29T10:49:52.880Z"}
+{"level":"info","message":"Bot started successfully","timestamp":"2025-05-29T10:49:52.913Z"}
+{"level":"info","message":"Message sent to Telegram","timestamp":"2025-05-29T10:49:53.052Z"}
+{"level":"info","message":"Trade opened and notification sent","timestamp":"2025-05-29T10:49:53.053Z"}
+{"level":"info","message":"📊 СТАТУС МОНИТОРИНГА:","timestamp":"2025-05-29T10:49:53.813Z"}
+{"level":"info","message":"🕒 Время: 12:49:53 PM","timestamp":"2025-05-29T10:49:53.825Z"}
+{"level":"info","message":"💰 Текущая цена: $108556.5","timestamp":"2025-05-29T10:49:53.826Z"}
+{"level":"info","message":"📈 Текущий объем: 219.20","timestamp":"2025-05-29T10:49:53.826Z"}
+{"level":"info","message":"⚠️ Ожидаем накопления истории свечей (нужно минимум 2 свечи)","timestamp":"2025-05-29T10:49:53.826Z"}
+{"level":"info","message":"➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖","timestamp":"2025-05-29T10:49:53.826Z"}
+{"level":"info","message":"📥 Загружаем начальную историю свечей для BTCUSDT","timestamp":"2025-05-29T10:52:51.195Z"}
+{"level":"info","message":"✅ Загружено 8 исторических свечей","timestamp":"2025-05-29T10:52:51.504Z"}
+{"level":"info","message":"📊 Последние свечи:","timestamp":"2025-05-29T10:52:51.504Z"}
+{"level":"info","message":"Предыдущая (12:30:00 PM): объем 388.52","timestamp":"2025-05-29T10:52:51.516Z"}
+{"level":"info","message":"Текущая (12:45:00 PM): объем 665.34","timestamp":"2025-05-29T10:52:51.516Z"}
+{"level":"info","message":"✅ Подписка на BTCUSDT активирована","timestamp":"2025-05-29T10:52:51.519Z"}
+{"level":"info","message":"Bot started successfully","timestamp":"2025-05-29T10:52:51.521Z"}
+{"level":"info","message":"Message sent to Telegram","timestamp":"2025-05-29T10:52:51.742Z"}
+{"level":"info","message":"Trade opened and notification sent","timestamp":"2025-05-29T10:52:51.743Z"}
+{"level":"info","message":"📊 СТАТУС МОНИТОРИНГА:","timestamp":"2025-05-29T10:52:52.493Z"}
+{"level":"info","message":"🕒 Время: 12:52:52 PM","timestamp":"2025-05-29T10:52:52.494Z"}
+{"level":"info","message":"💰 Текущая цена: $108629.6","timestamp":"2025-05-29T10:52:52.494Z"}
+{"level":"info","message":"📈 Текущий объем: 665.34","timestamp":"2025-05-29T10:52:52.494Z"}
+{"level":"info","message":"📊 Предыдущий объем: 388.52","timestamp":"2025-05-29T10:52:52.494Z"}
+{"level":"info","message":"📊 Текущее соотношение объемов: 1.71x (цель: 4x)","timestamp":"2025-05-29T10:52:52.494Z"}
+{"level":"info","message":"🎯 Нужно увеличение объема еще в 2.29x раз","timestamp":"2025-05-29T10:52:52.494Z"}
+{"level":"info","message":"🔒 Текущая свеча подтверждена: Нет","timestamp":"2025-05-29T10:52:52.494Z"}
+{"level":"info","message":"⏱️ Время свечи: 12:45:00 PM","timestamp":"2025-05-29T10:52:52.494Z"}
+{"level":"info","message":"➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖","timestamp":"2025-05-29T10:52:52.494Z"}
+{"level":"info","message":"📥 Загружаем начальную историю свечей для BTCUSDT","timestamp":"2025-05-29T10:56:57.644Z"}
+{"level":"error","message":"❌ Ошибка при загрузке истории свечей: Cannot read properties of undefined (reading 'SYMBOL')","stack":"TypeError: Cannot read properties of undefined (reading 'SYMBOL')\n    at mapKlineToCandle (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\services\\bybit.js:105:26)\n    at Array.map (<anonymous>)\n    at BybitService.initializeCandleHistory (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\services\\bybit.js:87:64)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async BybitService.subscribeToSymbol (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\services\\bybit.js:287:13)\n    at async main (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\index.js:30:9)","timestamp":"2025-05-29T10:56:57.952Z"}
+{"level":"info","message":"📥 Загружаем начальную историю свечей для BTCUSDT","timestamp":"2025-05-29T10:56:58.360Z"}
+{"level":"error","message":"❌ Ошибка при загрузке истории свечей: Cannot read properties of undefined (reading 'SYMBOL')","stack":"TypeError: Cannot read properties of undefined (reading 'SYMBOL')\n    at mapKlineToCandle (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\services\\bybit.js:105:26)\n    at Array.map (<anonymous>)\n    at BybitService.initializeCandleHistory (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\services\\bybit.js:87:64)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async BybitService.subscribeToSymbol (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\services\\bybit.js:287:13)\n    at async main (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\index.js:30:9)","timestamp":"2025-05-29T10:56:58.628Z"}
+{"level":"info","message":"📥 Загружаем начальную историю свечей для BTCUSDT","timestamp":"2025-05-29T10:56:59.051Z"}
+{"level":"error","message":"❌ Ошибка при загрузке истории свечей: Cannot read properties of undefined (reading 'SYMBOL')","stack":"TypeError: Cannot read properties of undefined (reading 'SYMBOL')\n    at mapKlineToCandle (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\services\\bybit.js:105:26)\n    at Array.map (<anonymous>)\n    at BybitService.initializeCandleHistory (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\services\\bybit.js:87:64)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async BybitService.subscribeToSymbol (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\services\\bybit.js:287:13)\n    at async main (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\index.js:30:9)","timestamp":"2025-05-29T10:56:59.324Z"}
+{"level":"info","message":"📥 Загружаем начальную историю свечей для BTCUSDT","timestamp":"2025-05-29T10:56:59.735Z"}
+{"level":"error","message":"❌ Ошибка при загрузке истории свечей: Cannot read properties of undefined (reading 'SYMBOL')","stack":"TypeError: Cannot read properties of undefined (reading 'SYMBOL')\n    at mapKlineToCandle (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\services\\bybit.js:105:26)\n    at Array.map (<anonymous>)\n    at BybitService.initializeCandleHistory (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\services\\bybit.js:87:64)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async BybitService.subscribeToSymbol (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\services\\bybit.js:287:13)\n    at async main (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\index.js:30:9)","timestamp":"2025-05-29T10:57:00.010Z"}
+{"level":"info","message":"📥 Загружаем начальную историю свечей для BTCUSDT","timestamp":"2025-05-29T10:57:00.435Z"}
+{"level":"error","message":"❌ Ошибка при загрузке истории свечей: Cannot read properties of undefined (reading 'SYMBOL')","stack":"TypeError: Cannot read properties of undefined (reading 'SYMBOL')\n    at mapKlineToCandle (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\services\\bybit.js:105:26)\n    at Array.map (<anonymous>)\n    at BybitService.initializeCandleHistory (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\services\\bybit.js:87:64)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async BybitService.subscribeToSymbol (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\services\\bybit.js:287:13)\n    at async main (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\index.js:30:9)","timestamp":"2025-05-29T10:57:00.703Z"}
+{"level":"info","message":"📥 Загружаем начальную историю свечей для BTCUSDT","timestamp":"2025-05-29T10:57:01.121Z"}
+{"level":"error","message":"❌ Ошибка при загрузке истории свечей: Cannot read properties of undefined (reading 'SYMBOL')","stack":"TypeError: Cannot read properties of undefined (reading 'SYMBOL')\n    at mapKlineToCandle (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\services\\bybit.js:105:26)\n    at Array.map (<anonymous>)\n    at BybitService.initializeCandleHistory (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\services\\bybit.js:87:64)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async BybitService.subscribeToSymbol (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\services\\bybit.js:287:13)\n    at async main (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\index.js:30:9)","timestamp":"2025-05-29T10:57:01.390Z"}
+{"level":"info","message":"📥 Загружаем начальную историю свечей для BTCUSDT","timestamp":"2025-05-29T10:57:01.800Z"}
+{"level":"error","message":"❌ Ошибка при загрузке истории свечей: Cannot read properties of undefined (reading 'SYMBOL')","stack":"TypeError: Cannot read properties of undefined (reading 'SYMBOL')\n    at mapKlineToCandle (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\services\\bybit.js:105:26)\n    at Array.map (<anonymous>)\n    at BybitService.initializeCandleHistory (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\services\\bybit.js:87:64)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async BybitService.subscribeToSymbol (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\services\\bybit.js:287:13)\n    at async main (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\index.js:30:9)","timestamp":"2025-05-29T10:57:02.075Z"}
+{"level":"info","message":"📥 Загружаем начальную историю свечей для BTCUSDT","timestamp":"2025-05-29T10:57:02.483Z"}
+{"level":"error","message":"❌ Ошибка при загрузке истории свечей: Cannot read properties of undefined (reading 'SYMBOL')","stack":"TypeError: Cannot read properties of undefined (reading 'SYMBOL')\n    at mapKlineToCandle (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\services\\bybit.js:105:26)\n    at Array.map (<anonymous>)\n    at BybitService.initializeCandleHistory (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\services\\bybit.js:87:64)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async BybitService.subscribeToSymbol (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\services\\bybit.js:287:13)\n    at async main (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\index.js:30:9)","timestamp":"2025-05-29T10:57:02.752Z"}
+{"level":"info","message":"📥 Загружаем начальную историю свечей для BTCUSDT","timestamp":"2025-05-29T10:57:03.176Z"}
+{"level":"error","message":"❌ Ошибка при загрузке истории свечей: Cannot read properties of undefined (reading 'SYMBOL')","stack":"TypeError: Cannot read properties of undefined (reading 'SYMBOL')\n    at mapKlineToCandle (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\services\\bybit.js:105:26)\n    at Array.map (<anonymous>)\n    at BybitService.initializeCandleHistory (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\services\\bybit.js:87:64)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async BybitService.subscribeToSymbol (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\services\\bybit.js:287:13)\n    at async main (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\index.js:30:9)","timestamp":"2025-05-29T10:57:03.449Z"}
+{"level":"info","message":"📥 Загружаем начальную историю свечей для BTCUSDT","timestamp":"2025-05-29T10:57:03.860Z"}
+{"level":"error","message":"❌ Ошибка при загрузке истории свечей: Cannot read properties of undefined (reading 'SYMBOL')","stack":"TypeError: Cannot read properties of undefined (reading 'SYMBOL')\n    at mapKlineToCandle (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\services\\bybit.js:105:26)\n    at Array.map (<anonymous>)\n    at BybitService.initializeCandleHistory (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\services\\bybit.js:87:64)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async BybitService.subscribeToSymbol (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\services\\bybit.js:287:13)\n    at async main (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\index.js:30:9)","timestamp":"2025-05-29T10:57:04.157Z"}
