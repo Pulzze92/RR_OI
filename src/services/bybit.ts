@@ -16,9 +16,11 @@ export class BybitService {
     private wsClient!: WebsocketClient;
     private readonly client: RestClientV5;
     private readonly SYMBOL = 'BTCUSDT';
-    private readonly TRADE_SIZE_USD = 1000;
-    private readonly TAKE_PROFIT_POINTS = 300;
-    private readonly STOP_LOSS_POINTS = 150;
+    private readonly TRADE_SIZE_USD = 10000;
+    private readonly TAKE_PROFIT_POINTS = 150;
+    private readonly STOP_LOSS_POINTS = 170;
+    private readonly TRAILING_ACTIVATION_POINTS = 150;  // Активация трейлинга при прибыли 150 пунктов
+    private readonly TRAILING_DISTANCE = 50;           // Расстояние трейлинга от цены
     private candleHistory: Candle[] = [];
     private currentSignal: VolumeSignal | null = null;
     private readonly volumeMultiplier: number;
@@ -26,10 +28,13 @@ export class BybitService {
     private readonly apiSecret: string;
     private lastLogTime: number = 0;
     private readonly LOG_INTERVAL = 5 * 60 * 1000;
+    private trailingStopInterval: NodeJS.Timeout | null = null;
     private activePosition: {
         side: OrderSideV5;
         entryPrice: number;
         entryTime: number;
+        isTrailingActive: boolean;
+        lastTrailingStopPrice: number | null;
     } | null = null;
 
     constructor(
@@ -261,7 +266,7 @@ export class BybitService {
             logger.info(`📊 Объем сигнальной свечи (C0): ${this.currentSignal.candle.volume.toFixed(2)}`);
             logger.info(`📊 Объем следующей свечи (C+1): ${completedCandle.volume.toFixed(2)}`);
             
-            // Проверяем, что свеча закрыта, подтверждена и её объем НЕ ВЫШЕ сигнальной
+            // Проверяем только объем, без учета времени
             if (completedCandle.confirmed && completedCandle.volume <= this.currentSignal.candle.volume) {
                 logger.info(`✅ УСЛОВИЯ ДЛЯ ВХОДА ВЫПОЛНЕНЫ:`);
                 logger.info(`📊 Объем сигнальной свечи (C0): ${this.currentSignal.candle.volume.toFixed(2)}`);
@@ -279,6 +284,7 @@ export class BybitService {
                 logger.info(`⏳ Ожидаем подтверждения свечи`);
             } else if (completedCandle.volume > this.currentSignal.candle.volume) {
                 logger.info(`⚠️ Объем следующей свечи (${completedCandle.volume.toFixed(2)}) выше сигнальной (${this.currentSignal.candle.volume.toFixed(2)}), пропускаем вход`);
+                // НЕ отменяем сигнал, продолжаем ждать свечу с подходящим объемом
             }
             logger.info('➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖');
         }
@@ -339,7 +345,9 @@ export class BybitService {
                 this.activePosition = {
                     side: side,
                     entryPrice: currentCandle.close,
-                    entryTime: currentCandle.timestamp
+                    entryTime: currentCandle.timestamp,
+                    isTrailingActive: false,
+                    lastTrailingStopPrice: null
                 };
 
                 const tpSlResponse = await this.client.setTradingStop({
@@ -351,6 +359,9 @@ export class BybitService {
                     tpTriggerBy: 'MarkPrice',
                     slTriggerBy: 'MarkPrice'
                 });
+
+                // Запускаем интервал проверки трейлинг-стопа
+                this.startTrailingStopCheck();
 
                 const message = this.formatTradeAlert(side, currentCandle.close, takeProfit, stopLoss, signalCandle, currentCandle);
                 this.onTradeOpen(message);
@@ -392,6 +403,9 @@ export class BybitService {
         if (!this.activePosition) return;
 
         try {
+            // Останавливаем проверку трейлинг-стопа
+            this.stopTrailingStopCheck();
+            
             // Закрываем позицию противоположным ордером
             const closeSide: OrderSideV5 = this.activePosition.side === 'Buy' ? 'Sell' : 'Buy';
             const contractSize = (this.TRADE_SIZE_USD / candle.close).toFixed(3);
@@ -445,6 +459,7 @@ export class BybitService {
         }
 
         const volumeRatio = completedCandle.volume / previousCandle.volume;
+        const VOLUME_THRESHOLD = 2000; // Пороговое значение объема
         
         // Если есть активная позиция и обнаружен аномальный объем - закрываем
         if (volumeRatio >= this.volumeMultiplier && this.activePosition) {
@@ -458,20 +473,19 @@ export class BybitService {
             }
         }
 
-        // Остальная логика проверки объема для входа остается без изменений
-        if (volumeRatio >= this.volumeMultiplier * 0.8) {
-            logger.info(`🔍 ПРОВЕРКА ОБЪЕМОВ ЗАКРЫТОЙ СВЕЧИ:`);
-            logger.info(`📊 Объем закрытой свечи: ${completedCandle.volume.toFixed(2)}`);
-            logger.info(`📊 Объем предыдущей свечи: ${previousCandle.volume.toFixed(2)}`);
-            logger.info(`📈 Соотношение: ${volumeRatio.toFixed(2)}x (цель: ${this.volumeMultiplier}x)`);
-            logger.info(`⏱️ Время свечи: ${new Date(completedCandle.timestamp).toLocaleTimeString()}`);
-            logger.info(`📊 Цена закрытия: ${completedCandle.close}`);
-            logger.info('➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖');
-        }
-        
-        if (volumeRatio >= this.volumeMultiplier && !this.currentSignal?.isActive) {
-            logger.info(`🚨 ОБНАРУЖЕН ВСПЛЕСК ОБЪЕМА В ЗАКРЫТОЙ СВЕЧЕ!`);
-            logger.info(`📊 Объем вырос в ${volumeRatio.toFixed(2)}x раз`);
+        // Проверяем на новый сигнал ТОЛЬКО если нет активного сигнала
+        const isVolumeSpike = volumeRatio >= this.volumeMultiplier;
+        const isHighVolume = completedCandle.volume >= VOLUME_THRESHOLD;
+
+        if (!this.currentSignal?.isActive && (isVolumeSpike || isHighVolume)) {
+            // Если объем этой свечи больше предыдущей в N раз ИЛИ больше 2000
+            logger.info(`🚨 ОБНАРУЖЕН ${isHighVolume ? 'ВЫСОКИЙ ОБЪЕМ' : 'ВСПЛЕСК ОБЪЕМА'} В ЗАКРЫТОЙ СВЕЧЕ!`);
+            if (isVolumeSpike) {
+                logger.info(`📊 Объем вырос в ${volumeRatio.toFixed(2)}x раз`);
+            }
+            if (isHighVolume) {
+                logger.info(`📊 Объем превысил порог ${VOLUME_THRESHOLD}: ${completedCandle.volume.toFixed(2)}`);
+            }
             logger.info(`💰 Цена закрытия: ${completedCandle.close}`);
             logger.info(`📈 Движение цены: ${((completedCandle.close - completedCandle.open) / completedCandle.open * 100).toFixed(2)}%`);
             
@@ -485,6 +499,35 @@ export class BybitService {
             };
             
             logger.info(`✅ Сигнал активирован, ожидаем следующую свечу с меньшим объемом`);
+            logger.info('➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖');
+        } else if (this.currentSignal?.isActive && completedCandle.volume > previousCandle.volume) {
+            // Если есть активный сигнал и текущая свеча больше предыдущей - она становится новой сигнальной
+            logger.info(`🔄 ОБНОВЛЕНИЕ СИГНАЛА:`);
+            logger.info(`📊 Новый объем выше предыдущего`);
+            logger.info(`📊 Предыдущий объем: ${previousCandle.volume.toFixed(2)}`);
+            logger.info(`📊 Новый объем: ${completedCandle.volume.toFixed(2)}`);
+            
+            this.currentSignal = {
+                candle: completedCandle,
+                isActive: true,
+                waitingForLowerVolume: true
+            };
+            
+            logger.info(`✅ Сигнал обновлен, ожидаем следующую свечу с меньшим объемом`);
+            logger.info('➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖');
+        } else if (volumeRatio >= this.volumeMultiplier * 0.8 || completedCandle.volume >= VOLUME_THRESHOLD * 0.8) {
+            // Просто логируем для информации
+            logger.info(`🔍 ПРОВЕРКА ОБЪЕМОВ ЗАКРЫТОЙ СВЕЧИ:`);
+            logger.info(`📊 Объем закрытой свечи: ${completedCandle.volume.toFixed(2)}`);
+            logger.info(`📊 Объем предыдущей свечи: ${previousCandle.volume.toFixed(2)}`);
+            if (volumeRatio >= this.volumeMultiplier * 0.8) {
+                logger.info(`📈 Соотношение: ${volumeRatio.toFixed(2)}x (цель: ${this.volumeMultiplier}x)`);
+            }
+            if (completedCandle.volume >= VOLUME_THRESHOLD * 0.8) {
+                logger.info(`📈 Приближение к пороговому объему: ${completedCandle.volume.toFixed(2)} (цель: ${VOLUME_THRESHOLD})`);
+            }
+            logger.info(`⏱️ Время свечи: ${new Date(completedCandle.timestamp).toLocaleTimeString()}`);
+            logger.info(`📊 Цена закрытия: ${completedCandle.close}`);
             logger.info('➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖');
         }
     }
@@ -518,6 +561,87 @@ export class BybitService {
         } catch (error) {
             logger.error(`❌ Ошибка при инициализации бота:`, error);
             throw error;
+        }
+    }
+
+    private startTrailingStopCheck(): void {
+        // Останавливаем предыдущий интервал, если он существует
+        this.stopTrailingStopCheck();
+
+        // Запускаем новый интервал
+        this.trailingStopInterval = setInterval(async () => {
+            if (!this.activePosition) {
+                this.stopTrailingStopCheck();
+                return;
+            }
+
+            try {
+                // Получаем текущую цену
+                const response = await this.client.getTickers({
+                    category: 'linear',
+                    symbol: this.SYMBOL
+                });
+
+                if (response.retCode === 0 && response.result.list && response.result.list[0]) {
+                    const currentPrice = Number(response.result.list[0].lastPrice);
+                    const entryPrice = this.activePosition.entryPrice;
+                    const side = this.activePosition.side;
+
+                    // Вычисляем текущую прибыль в пунктах
+                    const profitPoints = side === 'Buy' ? 
+                        currentPrice - entryPrice : 
+                        entryPrice - currentPrice;
+
+                    // Если прибыль достигла уровня активации трейлинга
+                    if (profitPoints >= this.TRAILING_ACTIVATION_POINTS) {
+                        // Вычисляем новый уровень стопа
+                        const newStopPrice = side === 'Buy' ? 
+                            currentPrice - this.TRAILING_DISTANCE : 
+                            currentPrice + this.TRAILING_DISTANCE;
+
+                        // Проверяем, нужно ли обновлять стоп
+                        if (!this.activePosition.isTrailingActive || 
+                            (side === 'Buy' && newStopPrice > (this.activePosition.lastTrailingStopPrice || 0)) ||
+                            (side === 'Sell' && newStopPrice < (this.activePosition.lastTrailingStopPrice || Infinity))) {
+                            
+                            // Если трейлинг активируется впервые, отменяем тейк-профит
+                            if (!this.activePosition.isTrailingActive) {
+                                logger.info(`🎯 Активация трейлинг-стопа! Отменяем тейк-профит`);
+                                await this.client.setTradingStop({
+                                    category: 'linear',
+                                    symbol: this.SYMBOL,
+                                    takeProfit: '0',
+                                    stopLoss: newStopPrice.toString(),
+                                    positionIdx: 0,
+                                    slTriggerBy: 'MarkPrice'
+                                });
+                                this.activePosition.isTrailingActive = true;
+                            } else {
+                                // Обновляем только стоп-лосс
+                                await this.client.setTradingStop({
+                                    category: 'linear',
+                                    symbol: this.SYMBOL,
+                                    stopLoss: newStopPrice.toString(),
+                                    positionIdx: 0,
+                                    slTriggerBy: 'MarkPrice'
+                                });
+                            }
+
+                            this.activePosition.lastTrailingStopPrice = newStopPrice;
+                            logger.info(`📈 Трейлинг-стоп передвинут: ${newStopPrice.toFixed(1)} (${this.TRAILING_DISTANCE} пунктов от цены ${currentPrice})`);
+                        }
+                    }
+                }
+            } catch (error) {
+                logger.error('❌ Ошибка при обновлении трейлинг-стопа:', error);
+            }
+        }, 10000); // Проверка каждые 10 секунд
+    }
+
+    private stopTrailingStopCheck(): void {
+        if (this.trailingStopInterval) {
+            clearInterval(this.trailingStopInterval);
+            this.trailingStopInterval = null;
         }
     }
 }
