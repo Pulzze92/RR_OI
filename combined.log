@@ -18045,3 +18045,4 @@
 {"level":"info","message":"✅ Позиция успешно закрыта лимитным ордером.","timestamp":"2025-05-30T22:00:01.009Z"}
 {"level":"info","message":"Message sent to Telegram","timestamp":"2025-05-30T22:00:01.223Z"}
 {"level":"info","message":"Trade update notification sent via Telegram.","timestamp":"2025-05-30T22:00:01.223Z"}
+{"level":"info","message":"Текущий объем формирующейся свечи (12:00:00 AM): 358.13, Закрытие: 104557","timestamp":"2025-05-30T22:11:30.600Z"}

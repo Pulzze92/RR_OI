@@ -649,6 +649,24 @@ export class TradingLogicService {
     logger.info("🔒 Блокируем множественные попытки открытия позиции");
 
     try {
+      // Проверяем "свежесть" сигнала (не старше 2 часов)
+      const now = Date.now();
+      const signalAge = now - signalCandle.timestamp;
+      const TWO_HOURS = 2 * 60 * 60 * 1000;
+
+      if (signalAge > TWO_HOURS) {
+        logger.info(
+          `🕒 СИГНАЛ УСТАРЕЛ: Сигнальная свеча от ${new Date(
+            signalCandle.timestamp
+          ).toLocaleTimeString()} (${Math.round(
+            signalAge / (60 * 60 * 1000)
+          )} часов назад)`
+        );
+        this.resetSignal();
+        this.isOpeningPosition = false;
+        return;
+      }
+
       // Дополнительная проверка через API - нет ли уже открытых позиций
       const positionsResponse = await this.client.getPositionInfo({
         category: "linear",
