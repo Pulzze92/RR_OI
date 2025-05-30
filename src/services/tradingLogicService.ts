@@ -16,10 +16,10 @@ export class TradingLogicService {
   private currentSignal: VolumeSignal | null = null;
   private activePosition: ActivePosition | null = null;
   private trailingStopInterval: NodeJS.Timeout | null = null;
-  private isOpeningPosition: boolean = false; // Флаг для предотвращения множественных попыток
-  private lastSignalNotificationTime: number = 0; // Время последнего уведомления о сигнале
-  private lastTrailingNotificationTime: number = 0; // Время последнего уведомления о трейлинге
-  private lastTrailingStopPrice: number = 0; // Последняя цена стопа для отслеживания значительных изменений
+  private isOpeningPosition: boolean = false;
+  private lastSignalNotificationTime: number = 0;
+  private lastTrailingNotificationTime: number = 0;
+  private lastTrailingStopPrice: number = 0;
 
   private readonly TAKE_PROFIT_POINTS: number;
   private readonly STOP_LOSS_POINTS: number;
@@ -161,7 +161,6 @@ export class TradingLogicService {
             );
 
             try {
-              const currentPrice = Number(position.markPrice);
               const entryPrice = Number(position.avgPrice);
 
               // Рассчитываем TP от цены входа (не от текущей!)
@@ -346,7 +345,29 @@ export class TradingLogicService {
     completedCandle: Candle,
     previousCandle: Candle
   ): void {
-    if (!completedCandle.confirmed) {
+    // Проверяем, что свеча не является текущей формирующейся
+    const now = new Date();
+    const candleTime = new Date(completedCandle.timestamp);
+    const isCurrentHourCandle =
+      candleTime.getUTCFullYear() === now.getUTCFullYear() &&
+      candleTime.getUTCMonth() === now.getUTCMonth() &&
+      candleTime.getUTCDate() === now.getUTCDate() &&
+      candleTime.getUTCHours() === now.getUTCHours();
+
+    if (isCurrentHourCandle) {
+      logger.info(
+        `⏳ ПРОПУСК ПРОВЕРКИ ОБЪЕМА: Свеча текущего часа (${new Date(
+          completedCandle.timestamp
+        ).toLocaleTimeString()})`
+      );
+      return;
+    }
+
+    // Проверяем, что обе свечи подтверждены
+    if (!completedCandle.confirmed || !previousCandle.confirmed) {
+      logger.info(
+        `⏳ ПРОПУСК ПРОВЕРКИ ОБЪЕМА: Свечи не подтверждены (текущая: ${completedCandle.confirmed}, предыдущая: ${previousCandle.confirmed})`
+      );
       return;
     }
 
@@ -355,13 +376,22 @@ export class TradingLogicService {
     if (this.activePosition) {
       const timeSinceEntry =
         completedCandle.timestamp - this.activePosition.entryTime;
-      if (timeSinceEntry > 0) {
+      const isAnomalousVolume = completedCandle.volume > 8000;
+
+      if (timeSinceEntry > 0 && isAnomalousVolume) {
         logger.info(
-          `🚨 ОБНАРУЖЕН АНОМАЛЬНЫЙ ОБЪЕМ ПОСЛЕ ВХОДА! Закрытие позиции.`
+          `🚨 ОБНАРУЖЕН АНОМАЛЬНЫЙ ОБЪЕМ ПОСЛЕ ВХОДА! Объем=${completedCandle.volume.toFixed(
+            2
+          )} > 7000 И рост в ${volumeRatio.toFixed(2)}x раз`
         );
-        logger.info(`📊 Объем вырос в ${volumeRatio.toFixed(2)}x раз`);
         this.closePosition(completedCandle, "Аномальный объем после входа");
         return;
+      } else if (timeSinceEntry > 0) {
+        logger.info(
+          `📊 Проверка объема после входа: Объем=${completedCandle.volume.toFixed(
+            2
+          )} (порог 7000), Изменение=${volumeRatio.toFixed(2)}x (порог 2x)`
+        );
       }
     }
 
@@ -378,11 +408,11 @@ export class TradingLogicService {
       }
       logger.info(`🚨 ОБНАРУЖЕН СИГНАЛ: ${signalReason} В ЗАКРЫТОЙ СВЕЧЕ!`);
       logger.info(`💰 Цена закрытия: ${completedCandle.close}`);
+      logger.info(`✅ Свеча подтверждена, можно использовать для сигнала`);
 
       // Отправляем уведомление только если прошло достаточно времени с последнего
       const now = Date.now();
       if (now - this.lastSignalNotificationTime > 60000) {
-        // Минимум 1 минута между уведомлениями
         const message = this.notificationService.formatVolumeAlert(
           completedCandle,
           previousCandle
@@ -438,17 +468,6 @@ export class TradingLogicService {
         2
       )}, Confirmed: ${completedCandle.confirmed}`
     );
-    logger.info(
-      `[TradingLogic] Текущий сигнал: ${
-        this.currentSignal
-          ? `Активен, время: ${new Date(
-              this.currentSignal.candle.timestamp
-            ).toLocaleTimeString()}, V=${this.currentSignal.candle.volume.toFixed(
-              2
-            )}`
-          : "НЕТ АКТИВНОГО СИГНАЛА"
-      }`
-    );
 
     if (
       !this.currentSignal?.isActive ||
@@ -474,9 +493,22 @@ export class TradingLogicService {
         completedCandle.timestamp
       ).toLocaleTimeString()}) в истории (размер: ${candleHistory.length})`
     );
-    const signalCandleFromHistory = candleHistory.find(
+
+    // Находим все сигнальные свечи с таким же таймстампом
+    const signalCandlesFromHistory = candleHistory.filter(
       c => c.timestamp === this.currentSignal!.candle.timestamp
     );
+
+    // Берем последнюю из них (с самым высоким индексом)
+    const signalCandleFromHistory =
+      signalCandlesFromHistory[signalCandlesFromHistory.length - 1];
+
+    if (signalCandlesFromHistory.length > 1) {
+      logger.info(
+        `📊 Найдено ${signalCandlesFromHistory.length} сигнальных свечей с одинаковым таймстампом. Используем последнюю.`
+      );
+    }
+
     const completedCandleFromHistory = candleHistory.find(
       c => c.timestamp === completedCandle.timestamp
     );
@@ -511,14 +543,49 @@ export class TradingLogicService {
 
     if (completedCandle.volume <= this.currentSignal.candle.volume) {
       logger.info(
-        `✅ [TradingLogic] Условие для входа выполнено: объем текущей свечи (${completedCandle.volume.toFixed(
+        `✅ [TradingLogic] Условие объема выполнено: объем текущей свечи (${completedCandle.volume.toFixed(
           2
         )}) <= объема сигнальной (${this.currentSignal.candle.volume.toFixed(
           2
         )})`
       );
+
+      // Проверяем, что свеча не является текущей формирующейся
+      const now = new Date();
+      const candleTime = new Date(completedCandle.timestamp);
+      const isCurrentHourCandle =
+        candleTime.getUTCFullYear() === now.getUTCFullYear() &&
+        candleTime.getUTCMonth() === now.getUTCMonth() &&
+        candleTime.getUTCDate() === now.getUTCDate() &&
+        candleTime.getUTCHours() === now.getUTCHours();
+
+      if (isCurrentHourCandle) {
+        logger.info(
+          `⏳ [TradingLogic] Найдена свеча с подходящим объемом, но это свеча текущего часа (${new Date(
+            completedCandle.timestamp
+          ).toLocaleTimeString()}). Ожидаем завершение часа.`
+        );
+        return;
+      }
+
+      // Дополнительная проверка подтверждения
+      if (!completedCandle.confirmed) {
+        logger.info(
+          `⏳ [TradingLogic] Найдена подходящая свеча с меньшим объемом, но она еще формируется (${new Date(
+            completedCandle.timestamp
+          ).toLocaleTimeString()}). Ожидаем подтверждение.`
+        );
+        return;
+      }
+
+      logger.info(
+        `✅ [TradingLogic] Найдена подтвержденная свеча с меньшим объемом (${new Date(
+          completedCandle.timestamp
+        ).toLocaleTimeString()}). Входим в позицию.`
+      );
+
       this.openPosition(this.currentSignal.candle, completedCandle);
-      // Сбрасываем сигнал только ПОСЛЕ успешной попытки открытия (или если она не удалась, но решение принято)
+      // Сбрасываем сигнал только ПОСЛЕ успешной попытки открытия
       this.currentSignal.isActive = false;
       this.currentSignal.waitingForLowerVolume = false;
       logger.info("[TradingLogic] Сигнал деактивирован после попытки входа.");

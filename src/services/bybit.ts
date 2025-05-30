@@ -23,7 +23,7 @@ export class BybitService {
   private readonly LOG_INTERVAL = 15 * 60 * 1000;
   private readonly RETROSPECTIVE_ANALYSIS_SIZE = 6;
 
-  private readonly TRADE_SIZE_USD = 1000;
+  private readonly TRADE_SIZE_USD = 5000;
   private readonly TAKE_PROFIT_POINTS = 400;
   private readonly STOP_LOSS_POINTS = 450;
   private readonly TRAILING_ACTIVATION_POINTS = 300;
