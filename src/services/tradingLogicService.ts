@@ -398,6 +398,21 @@ export class TradingLogicService {
     const isHighVolume = completedCandle.volume >= this.VOLUME_THRESHOLD;
 
     if (!this.currentSignal?.isActive && isHighVolume) {
+      // Проверяем "свежесть" сигнала (не старше 2 часов)
+      const signalAge = Date.now() - completedCandle.timestamp;
+      const TWO_HOURS = 2 * 60 * 60 * 1000;
+
+      if (signalAge > TWO_HOURS) {
+        logger.info(
+          `🕒 ПРОПУСК СИГНАЛА: Свеча слишком старая - от ${new Date(
+            completedCandle.timestamp
+          ).toLocaleTimeString()} (${Math.round(
+            signalAge / (60 * 60 * 1000)
+          )} часов назад)`
+        );
+        return;
+      }
+
       let signalReason = "";
       if (isHighVolume) {
         signalReason = `ВЫСОКИЙ ОБЪЕМ (${completedCandle.volume.toFixed(
