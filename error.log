@@ -10,3 +10,22 @@
 {"level":"error","message":"❌ Ошибка при загрузке истории свечей: Cannot read properties of undefined (reading 'SYMBOL')","stack":"TypeError: Cannot read properties of undefined (reading 'SYMBOL')\n    at mapKlineToCandle (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\services\\bybit.js:105:26)\n    at Array.map (<anonymous>)\n    at BybitService.initializeCandleHistory (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\services\\bybit.js:87:64)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async BybitService.subscribeToSymbol (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\services\\bybit.js:287:13)\n    at async main (C:\\Users\\pulzze\\Desktop\\dev\\SPIKE_VSA\\dist\\index.js:30:9)","timestamp":"2025-05-29T10:57:04.157Z"}
 {"level":"error","message":"❌ Ошибка при открытии позиции, код: 10001, сообщение: The number of contracts exceeds maximum limit allowed: too large, order_qty:100000000000 > max_qty:11900000000","timestamp":"2025-05-29T11:42:58.397Z"}
 {"level":"error","message":"❌ Лимитный ордер PostOnly не был размещен. Код: 110007, сообщение: ab not enough for new order","timestamp":"2025-05-29T19:29:58.195Z"}
+{"level":"error","message":"❌ Недостаточно средств! Доступно: 0.00 USDT, требуется маржи: 200.00 USDT","timestamp":"2025-05-29T21:19:02.898Z"}
+{"level":"error","message":"❌ Недостаточно средств! Доступно: 0.00 USDT, требуется маржи: 200.00 USDT","timestamp":"2025-05-29T21:19:02.899Z"}
+{"level":"error","message":"❌ Недостаточно средств! Доступно: 0.00 USDT, требуется маржи: 200.00 USDT","timestamp":"2025-05-29T21:19:02.900Z"}
+{"level":"error","message":"❌ Недостаточно средств! Доступно: 0.00 USDT, требуется маржи: 200.00 USDT","timestamp":"2025-05-29T21:19:02.901Z"}
+{"level":"error","message":"❌ Недостаточно средств! Доступно: 0.00 USDT, требуется маржи: 200.00 USDT","timestamp":"2025-05-29T21:19:02.902Z"}
+{"level":"error","message":"❌ Недостаточно средств! Доступно: 0.00 USDT, требуется маржи: 200.00 USDT","timestamp":"2025-05-29T21:19:02.903Z"}
+{"level":"error","message":"❌ Недостаточно средств! Доступно: 0.00 USDT, требуется маржи: 200.00 USDT","timestamp":"2025-05-29T21:19:02.912Z"}
+{"level":"error","message":"❌ Недостаточно средств! Доступно: 0.00 USDT, требуется маржи: 200.00 USDT","timestamp":"2025-05-29T21:19:02.926Z"}
+{"level":"error","message":"❌ Недостаточно средств! Доступно: 0.00 USDT, требуется маржи: 200.00 USDT","timestamp":"2025-05-29T21:19:03.500Z"}
+{"level":"error","message":"❌ Недостаточно средств! Доступно: 0.00 USDT, требуется маржи: 200.00 USDT","timestamp":"2025-05-29T21:23:51.004Z"}
+{"level":"error","message":"❌ Недостаточно средств! Доступно: 0.00 USDT, требуется маржи: 200.00 USDT","timestamp":"2025-05-29T21:23:51.055Z"}
+{"level":"error","message":"❌ Недостаточно средств! Доступно: 0.00 USDT, требуется маржи: 200.00 USDT","timestamp":"2025-05-29T21:23:51.056Z"}
+{"level":"error","message":"❌ Недостаточно средств! Доступно: 0.00 USDT, требуется маржи: 200.00 USDT","timestamp":"2025-05-29T21:23:51.058Z"}
+{"level":"error","message":"❌ Недостаточно средств! Доступно: 0.00 USDT, требуется маржи: 200.00 USDT","timestamp":"2025-05-29T21:23:51.060Z"}
+{"level":"error","message":"❌ Недостаточно средств! Доступно: 0.00 USDT, требуется маржи: 200.00 USDT","timestamp":"2025-05-29T21:23:51.065Z"}
+{"level":"error","message":"❌ Недостаточно средств! Доступно: 0.00 USDT, требуется маржи: 200.00 USDT","timestamp":"2025-05-29T21:23:51.398Z"}
+{"level":"error","message":"❌ Недостаточно средств! Доступно: 0.00 USDT, требуется маржи: 200.00 USDT","timestamp":"2025-05-29T21:23:51.693Z"}
+{"level":"error","message":"❌ Недостаточно средств! Доступно: 0.00 USDT, требуется маржи: 200.00 USDT","timestamp":"2025-05-29T21:23:51.711Z"}
+{"level":"error","message":"❌ Недостаточно средств! Доступно: 273.33 USDT, требуется маржи: 1000.00 USDT","timestamp":"2025-05-30T09:03:26.911Z"}
