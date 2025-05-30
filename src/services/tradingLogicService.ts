@@ -26,7 +26,6 @@ export class TradingLogicService {
   private readonly TRAILING_ACTIVATION_POINTS: number;
   private readonly TRAILING_DISTANCE: number;
   private readonly VOLUME_THRESHOLD: number;
-  private readonly VOLUME_MULTIPLIER: number;
   private readonly TRADE_SIZE_USD: number;
   private readonly SYMBOL: string;
   private readonly TRAILING_STOP_INTERVAL_MS = 3000;
@@ -44,7 +43,6 @@ export class TradingLogicService {
       trailingActivationPoints: number;
       trailingDistance: number;
       volumeThreshold: number;
-      volumeMultiplier: number;
     }
   ) {
     this.SYMBOL = options.symbol;
@@ -54,7 +52,6 @@ export class TradingLogicService {
     this.TRAILING_ACTIVATION_POINTS = options.trailingActivationPoints;
     this.TRAILING_DISTANCE = options.trailingDistance;
     this.VOLUME_THRESHOLD = options.volumeThreshold;
-    this.VOLUME_MULTIPLIER = options.volumeMultiplier;
   }
 
   public getActivePosition(): ActivePosition | null {
@@ -355,7 +352,7 @@ export class TradingLogicService {
 
     const volumeRatio = completedCandle.volume / previousCandle.volume;
 
-    if (volumeRatio >= this.VOLUME_MULTIPLIER && this.activePosition) {
+    if (this.activePosition) {
       const timeSinceEntry =
         completedCandle.timestamp - this.activePosition.entryTime;
       if (timeSinceEntry > 0) {
@@ -368,17 +365,14 @@ export class TradingLogicService {
       }
     }
 
-    const isVolumeSpike = volumeRatio >= this.VOLUME_MULTIPLIER;
     const isHighVolume = completedCandle.volume >= this.VOLUME_THRESHOLD;
 
-    if (!this.currentSignal?.isActive && (isVolumeSpike || isHighVolume)) {
+    if (!this.currentSignal?.isActive && isHighVolume) {
       let signalReason = "";
-      if (isVolumeSpike && isHighVolume) {
+      if (isHighVolume) {
         signalReason = `ВЫСОКИЙ ОБЪЕМ (${completedCandle.volume.toFixed(
           2
         )}) И ВСПЛЕСК ОБЪЕМА (${volumeRatio.toFixed(2)}x)`;
-      } else if (isVolumeSpike) {
-        signalReason = `ВСПЛЕСК ОБЪЕМА (${volumeRatio.toFixed(2)}x)`;
       } else {
         signalReason = `ВЫСОКИЙ ОБЪЕМ (${completedCandle.volume.toFixed(2)})`;
       }
@@ -409,8 +403,7 @@ export class TradingLogicService {
       );
     } else if (
       this.currentSignal?.isActive &&
-      completedCandle.volume > previousCandle.volume &&
-      completedCandle.volume / previousCandle.volume >= this.VOLUME_MULTIPLIER
+      completedCandle.volume > previousCandle.volume
     ) {
       logger.info(
         `🔄 ОБНОВЛЕНИЕ СИГНАЛА: Новая свеча с еще большим всплеском объема (${volumeRatio.toFixed(
@@ -425,10 +418,7 @@ export class TradingLogicService {
       logger.info(
         `✅ Сигнал обновлен, ожидаем следующую свечу с меньшим объемом`
       );
-    } else if (
-      volumeRatio >= this.VOLUME_MULTIPLIER * 0.8 ||
-      completedCandle.volume >= this.VOLUME_THRESHOLD * 0.8
-    ) {
+    } else if (completedCandle.volume >= this.VOLUME_THRESHOLD * 0.8) {
       logger.info(
         `🔍 ПРОВЕРКА ОБЪЕМОВ ЗАКРЫТОЙ СВЕЧИ (близко к сигналу): Объем ${completedCandle.volume.toFixed(
           2

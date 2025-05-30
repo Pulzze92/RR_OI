@@ -23,13 +23,12 @@ export class BybitService {
   private readonly LOG_INTERVAL = 15 * 60 * 1000;
   private readonly RETROSPECTIVE_ANALYSIS_SIZE = 6;
 
-  private readonly TRADE_SIZE_USD = 10000;
+  private readonly TRADE_SIZE_USD = 1000;
   private readonly TAKE_PROFIT_POINTS = 600;
   private readonly STOP_LOSS_POINTS = 450;
   private readonly TRAILING_ACTIVATION_POINTS = 400;
   private readonly TRAILING_DISTANCE = 50;
-  private readonly VOLUME_THRESHOLD = 2000;
-  private VOLUME_MULTIPLIER: number = 3;
+  private readonly VOLUME_THRESHOLD = 3000;
 
   private onTradeUpdate: (message: string) => void;
   private onSignalUpdate: (message: string) => void;
@@ -54,10 +53,6 @@ export class BybitService {
     this.onTradeUpdate = onTradeUpdate;
     this.onSignalUpdate = onSignalUpdate;
 
-    if (typeof volumeMultiplierParam === "number") {
-      this.VOLUME_MULTIPLIER = volumeMultiplierParam;
-    }
-
     this.notificationService = new NotificationService(
       this.SYMBOL,
       this.TRADE_SIZE_USD,
@@ -80,8 +75,7 @@ export class BybitService {
         stopLossPoints: this.STOP_LOSS_POINTS,
         trailingActivationPoints: this.TRAILING_ACTIVATION_POINTS,
         trailingDistance: this.TRAILING_DISTANCE,
-        volumeThreshold: this.VOLUME_THRESHOLD,
-        volumeMultiplier: this.VOLUME_MULTIPLIER
+        volumeThreshold: this.VOLUME_THRESHOLD
       }
     );
   }
@@ -102,7 +96,6 @@ export class BybitService {
         `🤖 БОТ ЗАПУЩЕН\n\n` +
         `📊 Торговая пара: ${this.SYMBOL}\n` +
         `💰 Размер позиции: $${this.TRADE_SIZE_USD}\n` +
-        `📈 Множитель объема: ${this.VOLUME_MULTIPLIER}x\n` +
         `⏱️ Таймфрейм: ${this.CANDLE_INTERVAL}h\n` +
         `📥 Загружено свечей для анализа: ${this.candleHistory.length}\n` +
         `🚫 Ретроспективный поиск сигналов отключен`;
