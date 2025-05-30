@@ -2860,3 +2860,4 @@
 {"level":"info","message":"Trade update notification sent via Telegram.","timestamp":"2025-05-30T18:34:47.153Z"}
 {"level":"info","message":"Соединение WebSocket открыто. wsKey: v5LinearPublic","timestamp":"2025-05-30T18:34:47.451Z"}
 {"level":"info","message":"Текущий объем формирующейся свечи (8:00:00 PM): 3907.29, Закрытие: 104616.3","timestamp":"2025-05-30T18:34:47.646Z"}
+{"level":"info","message":"Shutting down...","timestamp":"2025-05-30T18:39:03.743Z"}

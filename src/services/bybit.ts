@@ -24,10 +24,10 @@ export class BybitService {
   private readonly RETROSPECTIVE_ANALYSIS_SIZE = 6;
 
   private readonly TRADE_SIZE_USD = 1000;
-  private readonly TAKE_PROFIT_POINTS = 600;
+  private readonly TAKE_PROFIT_POINTS = 400;
   private readonly STOP_LOSS_POINTS = 450;
-  private readonly TRAILING_ACTIVATION_POINTS = 400;
-  private readonly TRAILING_DISTANCE = 50;
+  private readonly TRAILING_ACTIVATION_POINTS = 300;
+  private readonly TRAILING_DISTANCE = 100;
   private readonly VOLUME_THRESHOLD = 3000;
 
   private onTradeUpdate: (message: string) => void;
