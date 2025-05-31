@@ -397,6 +397,18 @@ export class TradingLogicService {
 
     const isHighVolume = completedCandle.volume >= this.VOLUME_THRESHOLD;
 
+    // Сначала проверяем возможность использовать свечу как подтверждающую
+    if (
+      this.currentSignal?.isActive &&
+      this.currentSignal.waitingForLowerVolume
+    ) {
+      logger.info(
+        `[TradingLogic] Текущая свеча будет проверена как подтверждающая в processCompletedCandle`
+      );
+      return; // Выходим, чтобы processCompletedCandle мог обработать свечу
+    }
+
+    // Проверяем нужно ли создать новый сигнал
     if (!this.currentSignal?.isActive && isHighVolume) {
       // Проверяем "свежесть" сигнала (не старше 2 часов)
       const signalAge = Date.now() - completedCandle.timestamp;
@@ -453,7 +465,9 @@ export class TradingLogicService {
       logger.info(
         `🔄 ОБНОВЛЕНИЕ СИГНАЛА: Новая свеча с еще большим всплеском объема (${volumeRatio.toFixed(
           2
-        )}x).`
+        )}x) и объемом выше порога (${completedCandle.volume.toFixed(2)} > ${
+          this.VOLUME_THRESHOLD
+        }).`
       );
       this.currentSignal = {
         candle: completedCandle,
@@ -472,10 +486,10 @@ export class TradingLogicService {
     }
   }
 
-  public processCompletedCandle(
+  public async processCompletedCandle(
     completedCandle: Candle,
     candleHistory: Candle[]
-  ): void {
+  ): Promise<void> {
     logger.info(
       `[TradingLogic] processCompletedCandle вызван для свечи: ${new Date(
         completedCandle.timestamp
@@ -593,17 +607,36 @@ export class TradingLogicService {
         return;
       }
 
+      // Проверяем "свежесть" сигнала перед входом
+      const signalAge = Date.now() - this.currentSignal.candle.timestamp;
+      const TWO_HOURS = 2 * 60 * 60 * 1000;
+
+      if (signalAge > TWO_HOURS) {
+        logger.info(
+          `🕒 ПРОПУСК ВХОДА: Сигнальная свеча слишком старая - от ${new Date(
+            this.currentSignal.candle.timestamp
+          ).toLocaleTimeString()} (${Math.round(
+            signalAge / (60 * 60 * 1000)
+          )} часов назад)`
+        );
+        this.resetSignal();
+        return;
+      }
+
       logger.info(
         `✅ [TradingLogic] Найдена подтвержденная свеча с меньшим объемом (${new Date(
           completedCandle.timestamp
         ).toLocaleTimeString()}). Входим в позицию.`
       );
 
-      this.openPosition(this.currentSignal.candle, completedCandle);
-      // Сбрасываем сигнал только ПОСЛЕ успешной попытки открытия
-      this.currentSignal.isActive = false;
-      this.currentSignal.waitingForLowerVolume = false;
-      logger.info("[TradingLogic] Сигнал деактивирован после попытки входа.");
+      await this.openPosition(this.currentSignal.candle, completedCandle);
+
+      // Проверяем, не был ли сигнал сброшен во время openPosition
+      if (this.currentSignal) {
+        this.currentSignal.isActive = false;
+        this.currentSignal.waitingForLowerVolume = false;
+        logger.info("[TradingLogic] Сигнал деактивирован после попытки входа.");
+      }
     } else {
       logger.info(
         `❌ [TradingLogic] Условие для входа НЕ выполнено: объем текущей свечи (${completedCandle.volume.toFixed(

@@ -264,7 +264,19 @@ export class BybitService {
     this.wsClient = new WebsocketClient({
       key: this.apiKey,
       secret: this.apiSecret,
-      market: "v5"
+      market: "v5",
+
+      // Увеличиваем интервал проверки соединения до 30 секунд
+      pingInterval: 30000,
+
+      // Увеличиваем таймаут ожидания pong до 10 секунд
+      pongTimeout: 10000,
+
+      // Увеличиваем задержку перед переподключением до 3 секунд
+      reconnectTimeout: 3000,
+
+      // Увеличиваем окно для аутентификации (для VPN/медленных соединений)
+      recvWindow: 10000
     });
 
     this.wsClient.subscribeV5(
@@ -301,6 +313,20 @@ export class BybitService {
 
     this.wsClient.on("open", (evt: { wsKey: WsKey; event: any }) => {
       logger.info(`Соединение WebSocket открыто. wsKey: ${evt.wsKey}`);
+    });
+
+    // Добавляем обработчик ошибок
+    this.wsClient.on("exception", (err: any) => {
+      logger.error("Ошибка WebSocket:", err);
+    });
+
+    // Добавляем обработчик переподключения
+    this.wsClient.on("reconnect", ({ wsKey }: { wsKey: string }) => {
+      logger.info(`WebSocket переподключается... wsKey: ${wsKey}`);
+    });
+
+    this.wsClient.on("reconnected", (data: any) => {
+      logger.info(`WebSocket переподключен. wsKey: ${data?.wsKey}`);
     });
   }
 
