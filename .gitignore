@@ -1,4 +1,5 @@
 .env
+combined.log
 node_modules/
 dist/
 # Logs

@@ -23,11 +23,11 @@ export class BybitService {
   private readonly LOG_INTERVAL = 15 * 60 * 1000;
   private readonly RETROSPECTIVE_ANALYSIS_SIZE = 6;
 
-  private readonly TRADE_SIZE_USD = 3000;
+  private readonly TRADE_SIZE_USD = 5000;
   private readonly TAKE_PROFIT_POINTS = 400;
-  private readonly STOP_LOSS_POINTS = 450;
+  private readonly STOP_LOSS_POINTS = 250;
   private readonly TRAILING_ACTIVATION_POINTS = 300;
-  private readonly TRAILING_DISTANCE = 100;
+  private readonly TRAILING_DISTANCE = 200;
   private readonly VOLUME_THRESHOLD = 3000;
 
   private onTradeUpdate: (message: string) => void;
@@ -90,6 +90,9 @@ export class BybitService {
 
       // Анализируем только ПОСЛЕДНЮЮ завершенную свечу для контекста
       await this.analyzeLastCandle();
+
+      // Завершаем начальный анализ истории
+      this.tradingLogicService.finishInitialHistoryAnalysis();
 
       this.subscribeToCandleUpdates();
       const startMessage =
