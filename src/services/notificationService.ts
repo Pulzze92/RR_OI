@@ -37,7 +37,8 @@ export class NotificationService {
     stopLoss: number,
     signalCandle: Candle,
     currentCandle: Candle,
-    isLimitOrder: boolean = false
+    isLimitOrder: boolean = false,
+    side: "Buy" | "Sell"
   ): string {
     const contractSize = (
       this.TRADE_SIZE_USD / activePosition.entryPrice

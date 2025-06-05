@@ -16,6 +16,8 @@ export interface VolumeSignal {
   candle: Candle;
   isActive: boolean;
   waitingForLowerVolume: boolean;
+  waitingForEntry?: boolean;
+  confirmingCandle?: Candle;
 }
 
 export interface ActivePosition {

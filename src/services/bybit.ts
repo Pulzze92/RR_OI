@@ -1,4 +1,4 @@
-import { RestClientV5, WebsocketClient, WsKey } from "bybit-api";
+import { RestClientV5, WebsocketClient, WsKey, WS_KEY_MAP } from "bybit-api";
 import { logger } from "../utils/logger";
 import { Candle } from "./bybit.types";
 import { NotificationService } from "./notificationService";
@@ -12,23 +12,25 @@ export class BybitService {
   private readonly client: RestClientV5;
   private candleHistory: Candle[] = [];
   private lastLogTime: number = 0;
+  private restCheckInterval: NodeJS.Timeout | null = null;
+  private readonly REST_CHECK_INTERVAL = 5 * 60 * 1000; // 5 минут
 
   private readonly apiKey: string;
   private readonly apiSecret: string;
 
-  private readonly SYMBOL = "BTCUSDT";
-  private readonly CANDLE_INTERVAL: string = "60";
+  private readonly SYMBOL = "SOLUSDT";
+  private readonly CANDLE_INTERVAL: string = "240";
   private readonly CANDLE_HISTORY_SIZE = 6;
-  private readonly INITIAL_HISTORY_HOURS = 12;
+  private readonly INITIAL_HISTORY_HOURS = 48;
   private readonly LOG_INTERVAL = 15 * 60 * 1000;
-  private readonly RETROSPECTIVE_ANALYSIS_SIZE = 6;
+  private readonly RETROSPECTIVE_ANALYSIS_SIZE = 12;
 
   private readonly TRADE_SIZE_USD = 5000;
-  private readonly TAKE_PROFIT_POINTS = 400;
-  private readonly STOP_LOSS_POINTS = 250;
-  private readonly TRAILING_ACTIVATION_POINTS = 300;
-  private readonly TRAILING_DISTANCE = 200;
-  private readonly VOLUME_THRESHOLD = 3000;
+  private readonly TAKE_PROFIT_POINTS = 4;
+  private readonly STOP_LOSS_POINTS = 2;
+  private readonly TRAILING_ACTIVATION_POINTS = 2;
+  private readonly TRAILING_DISTANCE = 1.5;
+  private readonly VOLUME_THRESHOLD = 1000000;
 
   private onTradeUpdate: (message: string) => void;
   private onSignalUpdate: (message: string) => void;
@@ -80,13 +82,16 @@ export class BybitService {
     );
   }
 
-  public async initialize(): Promise<void> {
+  public async start(): Promise<void> {
     try {
       // Загружаем минимум последних свечей для корректного анализа объемов
-      await this.loadInitialCandleHistory();
+      const allCandles = await this.loadInitialCandleHistory();
+
+      // Анализируем историю для поиска сигналов
+      await this.performRetrospectiveAnalysis(allCandles);
 
       // Синхронизируем состояние позиций при запуске
-      await this.tradingLogicService.syncPositionState();
+      await this.tradingLogicService.syncPositionState(allCandles);
 
       // Анализируем только ПОСЛЕДНЮЮ завершенную свечу для контекста
       await this.analyzeLastCandle();
@@ -110,6 +115,17 @@ export class BybitService {
       logger.error("Ошибка инициализации сервиса Bybit:", error);
       throw error;
     }
+  }
+
+  public stop(): void {
+    if (this.wsClient) {
+      this.wsClient.close(WS_KEY_MAP.linearPublic);
+    }
+    if (this.restCheckInterval) {
+      clearInterval(this.restCheckInterval);
+      this.restCheckInterval = null;
+    }
+    logger.info("Сервис Bybit остановлен");
   }
 
   private async loadInitialCandleHistory(): Promise<Candle[]> {
@@ -205,61 +221,34 @@ export class BybitService {
       return;
     }
 
-    // Анализируем свечи, начиная со второй (нужна предыдущая для сравнения)
-    for (let i = 1; i < allCandles.length; i++) {
+    // Анализируем свечи в обратном порядке (от новых к старым)
+    for (let i = allCandles.length - 1; i > 0; i--) {
       const currentCandle = allCandles[i];
       const previousCandle = allCandles[i - 1];
+
+      if (!currentCandle.confirmed || !previousCandle.confirmed) {
+        logger.info(
+          `⏳ Пропуск незавершенной свечи в истории (${new Date(
+            currentCandle.timestamp
+          ).toLocaleTimeString()})`
+        );
+        continue;
+      }
 
       // Проверяем объем для обнаружения сигналов
       this.tradingLogicService.checkVolumeSpike(currentCandle, previousCandle);
 
-      // Если найден активный сигнал, проверяем последующие свечи на возможность входа
-      const currentSignal = this.tradingLogicService.getCurrentSignal();
-      if (currentSignal?.isActive) {
-        logger.info(
-          `📊 Найден сигнал в истории: ${new Date(
-            currentSignal.candle.timestamp
-          ).toLocaleTimeString()}, объем: ${currentSignal.candle.volume.toFixed(
-            2
-          )}`
-        );
-
-        // Проверяем все последующие свечи на возможность входа
-        for (let j = i + 1; j < allCandles.length; j++) {
-          const laterCandle = allCandles[j];
-          this.tradingLogicService.processCompletedCandle(
-            laterCandle,
-            allCandles.slice(0, j + 1)
+      // Если найден сигнал, проверяем следующую свечу как подтверждающую
+      if (this.tradingLogicService.getCurrentSignal()?.isActive) {
+        // Проверяем следующую свечу после сигнальной
+        if (i + 1 < allCandles.length) {
+          const confirmingCandle = allCandles[i + 1];
+          await this.tradingLogicService.processCompletedCandle(
+            confirmingCandle,
+            allCandles
           );
-
-          // Если уже есть активная позиция, прекращаем анализ
-          if (this.tradingLogicService.getActivePosition()) {
-            logger.info(
-              "✅ Найдена возможность входа в ретроспективном анализе, позиция открыта"
-            );
-            return;
-          }
-
-          // Если сигнал был сброшен, продолжаем поиск
-          const updatedSignal = this.tradingLogicService.getCurrentSignal();
-          if (!updatedSignal?.isActive) {
-            break;
-          }
         }
       }
-    }
-
-    const finalSignal = this.tradingLogicService.getCurrentSignal();
-    if (finalSignal?.isActive) {
-      logger.info(
-        `⏳ Ретроспективный анализ завершен. Активный сигнал найден (${new Date(
-          finalSignal.candle.timestamp
-        ).toLocaleTimeString()}), ожидаем подтверждение`
-      );
-    } else {
-      logger.info(
-        "🔍 Ретроспективный анализ завершен. Активных сигналов не найдено"
-      );
     }
   }
 
@@ -276,10 +265,7 @@ export class BybitService {
       pongTimeout: 10000,
 
       // Увеличиваем задержку перед переподключением до 3 секунд
-      reconnectTimeout: 3000,
-
-      // Увеличиваем окно для аутентификации (для VPN/медленных соединений)
-      recvWindow: 10000
+      reconnectTimeout: 3000
     });
 
     this.wsClient.subscribeV5(
@@ -318,11 +304,6 @@ export class BybitService {
       logger.info(`Соединение WebSocket открыто. wsKey: ${evt.wsKey}`);
     });
 
-    // Добавляем обработчик ошибок
-    this.wsClient.on("exception", (err: any) => {
-      logger.error("Ошибка WebSocket:", err);
-    });
-
     // Добавляем обработчик переподключения
     this.wsClient.on("reconnect", ({ wsKey }: { wsKey: string }) => {
       logger.info(`WebSocket переподключается... wsKey: ${wsKey}`);
@@ -353,6 +334,13 @@ export class BybitService {
     if (existingCandleIndex !== -1) {
       this.candleHistory[existingCandleIndex] = newCandle;
     } else {
+      logger.info(
+        `🆕 ПОЛУЧЕНА НОВАЯ СВЕЧА (${new Date(
+          newCandle.timestamp
+        ).toLocaleTimeString()}): O=${newCandle.open} H=${newCandle.high} L=${
+          newCandle.low
+        } C=${newCandle.close} V=${newCandle.volume.toFixed(2)}`
+      );
       this.candleHistory.push(newCandle);
       if (this.candleHistory.length > this.CANDLE_HISTORY_SIZE) {
         this.candleHistory.shift();
@@ -361,14 +349,47 @@ export class BybitService {
 
     this.candleHistory.sort((a, b) => a.timestamp - b.timestamp);
 
+    // Если это новая свеча (не обновление существующей)
+    if (existingCandleIndex === -1) {
+      logger.info(`📊 ИСТОРИЯ СВЕЧЕЙ ПОСЛЕ ДОБАВЛЕНИЯ НОВОЙ:`);
+      this.candleHistory.forEach((candle, index) => {
+        logger.info(
+          `   ${index}: ${new Date(
+            candle.timestamp
+          ).toLocaleTimeString()} V=${candle.volume.toFixed(2)} ${
+            candle.confirmed ? "✅" : "⏳"
+          }`
+        );
+      });
+
+      logger.info(
+        `🔄 Передаем новую свечу в TradingLogicService для проверки условий входа...`
+      );
+      this.tradingLogicService.processCompletedCandle(newCandle, [
+        ...this.candleHistory
+      ]);
+    }
+
     if (newCandle.confirmed) {
       logger.info(
-        `🕯️ Новая ЗАВЕРШЕННАЯ свеча (${new Date(
+        `🕯️ ЗАВЕРШЕННАЯ свеча (${new Date(
           newCandle.timestamp
         ).toLocaleTimeString()}): O=${newCandle.open} H=${newCandle.high} L=${
           newCandle.low
         } C=${newCandle.close} V=${newCandle.volume.toFixed(2)}`
       );
+
+      // Проверяем, что предыдущая свеча тоже подтверждена
+      const previousCandle = this.candleHistory[this.candleHistory.length - 2];
+      if (!previousCandle?.confirmed) {
+        logger.info(
+          `⏳ ПРОПУСК ОБРАБОТКИ: Предыдущая свеча (${new Date(
+            previousCandle?.timestamp
+          ).toLocaleTimeString()}) еще не подтверждена`
+        );
+        return;
+      }
+
       this.processCompletedCandle(newCandle);
     }
   }
@@ -424,114 +445,35 @@ export class BybitService {
     if (this.candleHistory.length >= 3) {
       logger.info(`🔍 Проверка последних свечей на готовые сигналы...`);
 
-      let latestActiveSignal: any = null;
-      let latestSignalIndex = -1;
-
-      // ВАЖНО: Анализируем от НОВЫХ к СТАРЫМ чтобы найти самый свежий сигнал
-      for (let i = this.candleHistory.length - 1; i >= 1; i--) {
+      // Анализируем от НОВЫХ к СТАРЫМ
+      for (let i = this.candleHistory.length - 1; i > 0; i--) {
         const currentCandle = this.candleHistory[i];
         const previousCandle = this.candleHistory[i - 1];
 
         logger.info(
-          `   ${new Date(
+          `   Проверка свечи ${new Date(
             currentCandle.timestamp
-          ).toLocaleTimeString()}: V=${currentCandle.volume.toFixed(
-            2
-          )} vs предыдущая V=${previousCandle.volume.toFixed(2)}`
+          ).toLocaleTimeString()}: V=${currentCandle.volume.toFixed(2)}`
         );
 
-        // Временно сбрасываем текущий сигнал для проверки
-        const originalSignal = this.tradingLogicService.getCurrentSignal();
-        this.tradingLogicService.resetSignal();
-
-        // Проверяем есть ли всплеск объема в этой свече
+        // Проверяем объем для обнаружения сигналов
         this.tradingLogicService.checkVolumeSpike(
           currentCandle,
           previousCandle
         );
 
-        // Если обнаружен сигнал, запоминаем его как кандидата
-        const detectedSignal = this.tradingLogicService.getCurrentSignal();
-        if (detectedSignal?.isActive && !latestActiveSignal) {
-          latestActiveSignal = detectedSignal;
-          latestSignalIndex = i;
-          logger.info(
-            `📊 Найден сигнал-кандидат: ${new Date(
-              detectedSignal.candle.timestamp
-            ).toLocaleTimeString()}, V=${detectedSignal.candle.volume.toFixed(
-              2
-            )}`
-          );
-        }
-
-        // Восстанавливаем оригинальный сигнал
-        this.tradingLogicService.setSignal(originalSignal);
-      }
-
-      // Если найден самый свежий сигнал, активируем его и проверяем подтверждения
-      if (latestActiveSignal && latestSignalIndex >= 0) {
-        logger.info(
-          `🎯 САМЫЙ СВЕЖИЙ СИГНАЛ: ${new Date(
-            latestActiveSignal.candle.timestamp
-          ).toLocaleTimeString()}, V=${latestActiveSignal.candle.volume.toFixed(
-            2
-          )}`
-        );
-
-        this.tradingLogicService.setSignal(latestActiveSignal);
-
-        // Проверяем все последующие свечи на подтверждение
-        for (
-          let j = latestSignalIndex + 1;
-          j < this.candleHistory.length;
-          j++
-        ) {
-          const laterCandle = this.candleHistory[j];
-
-          logger.info(
-            `   Проверка подтверждения: ${new Date(
-              laterCandle.timestamp
-            ).toLocaleTimeString()}, V=${laterCandle.volume.toFixed(
-              2
-            )} vs сигнал V=${latestActiveSignal.candle.volume.toFixed(2)}`
-          );
-
-          this.tradingLogicService.processCompletedCandle(
-            laterCandle,
-            this.candleHistory.slice(0, j + 1)
-          );
-
-          // Если позиция открыта, завершаем анализ
-          if (this.tradingLogicService.getActivePosition()) {
-            logger.info("✅ Позиция открыта по историческому сигналу");
-            return;
-          }
-
-          // Если сигнал был обработан/сброшен, завершаем проверку
-          const updatedSignal = this.tradingLogicService.getCurrentSignal();
-          if (!updatedSignal?.isActive) {
-            logger.info("⏹️ Исторический сигнал завершен");
-            break;
+        // Если найден сигнал, проверяем следующую свечу как подтверждающую
+        if (this.tradingLogicService.getCurrentSignal()?.isActive) {
+          // Проверяем следующую свечу после сигнальной
+          if (i + 1 < this.candleHistory.length) {
+            const confirmingCandle = this.candleHistory[i + 1];
+            await this.tradingLogicService.processCompletedCandle(
+              confirmingCandle,
+              this.candleHistory
+            );
           }
         }
-
-        // Если сигнал все еще активен после проверки всех последующих свечей
-        const finalSignal = this.tradingLogicService.getCurrentSignal();
-        if (finalSignal?.isActive) {
-          logger.info(
-            `⏳ Самый свежий сигнал остается активным (${new Date(
-              finalSignal.candle.timestamp
-            ).toLocaleTimeString()}), ожидаем подтверждения`
-          );
-          return;
-        }
       }
-
-      logger.info(
-        "✅ Анализ истории завершен. Готовых сигналов не найдено, ожидаем новые данные..."
-      );
-    } else {
-      logger.warn("⚠️ Недостаточно свечей для анализа истории");
     }
   }
 }

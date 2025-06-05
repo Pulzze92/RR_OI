@@ -45,12 +45,13 @@ async function main() {
       handleSignalUpdate
     );
 
-    await bybitService.initialize();
+    await bybitService.start();
 
     logger.info("Bot started successfully after BybitService initialization.");
 
     process.on("SIGINT", async () => {
       logger.info("Shutting down...");
+      bybitService.stop();
       process.exit(0);
     });
 
