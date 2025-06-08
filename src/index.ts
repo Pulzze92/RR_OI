@@ -42,7 +42,9 @@ async function main() {
       BYBIT_API_KEY as string,
       BYBIT_API_SECRET as string,
       handleTradeUpdate,
-      handleSignalUpdate
+      handleSignalUpdate,
+      undefined,
+      true
     );
 
     await bybitService.start();

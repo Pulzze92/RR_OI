@@ -65,3 +65,59 @@
 {"code":"ENOTFOUND","config":{"headers":{"Accept":"application/json, text/plain, */*","User-Agent":"axios/0.21.4","X-BAPI-API-KEY":"I2CLfrLd1KvY0XZ2UE","X-BAPI-RECV-WINDOW":5000,"X-BAPI-SIGN":"328b2772e0405522b57450e776447a47e83dc1cd23376c218bf9321c6d29a90d","X-BAPI-SIGN-TYPE":2,"X-BAPI-TIMESTAMP":1749087514198,"x-referer":"bybitapinode"},"maxBodyLength":-1,"maxContentLength":-1,"method":"get","params":{"category":"linear","symbol":"SOLUSDT"},"timeout":300000,"transformRequest":[null],"transformResponse":[null],"transitional":{"clarifyTimeoutError":false,"forcedJSONParsing":true,"silentJSONParsing":true},"url":"https://api.bybit.com/v5/position/list","xsrfCookieName":"XSRF-TOKEN","xsrfHeaderName":"X-XSRF-TOKEN"},"message":"❌ Ошибка при проверке состояния позиции: getaddrinfo ENOTFOUND api.bybit.com","stack":"Error: getaddrinfo ENOTFOUND api.bybit.com\n    at GetAddrInfoReqWrap.onlookup [as oncomplete] (node:dns:107:26)"}
 {"code":"ENOTFOUND","config":{"headers":{"Accept":"application/json, text/plain, */*","User-Agent":"axios/0.21.4","X-BAPI-API-KEY":"I2CLfrLd1KvY0XZ2UE","X-BAPI-RECV-WINDOW":5000,"X-BAPI-SIGN":"91c630ab6ee6de7782a646ca2481cdd9e7ad494f28f69d7c7b48b6ae91a02164","X-BAPI-SIGN-TYPE":2,"X-BAPI-TIMESTAMP":1749087574200,"x-referer":"bybitapinode"},"maxBodyLength":-1,"maxContentLength":-1,"method":"get","params":{"category":"linear","symbol":"SOLUSDT"},"timeout":300000,"transformRequest":[null],"transformResponse":[null],"transitional":{"clarifyTimeoutError":false,"forcedJSONParsing":true,"silentJSONParsing":true},"url":"https://api.bybit.com/v5/position/list","xsrfCookieName":"XSRF-TOKEN","xsrfHeaderName":"X-XSRF-TOKEN"},"message":"❌ Ошибка при проверке состояния позиции: getaddrinfo ENOTFOUND api.bybit.com","stack":"Error: getaddrinfo ENOTFOUND api.bybit.com\n    at GetAddrInfoReqWrap.onlookup [as oncomplete] (node:dns:107:26)"}
 {"code":"ENOTFOUND","config":{"headers":{"Accept":"application/json, text/plain, */*","User-Agent":"axios/0.21.4","X-BAPI-API-KEY":"I2CLfrLd1KvY0XZ2UE","X-BAPI-RECV-WINDOW":5000,"X-BAPI-SIGN":"5d70ac413eae98e7fdebd2232d247472500617706a897c176a8ab116ddc9d291","X-BAPI-SIGN-TYPE":2,"X-BAPI-TIMESTAMP":1749087634203,"x-referer":"bybitapinode"},"maxBodyLength":-1,"maxContentLength":-1,"method":"get","params":{"category":"linear","symbol":"SOLUSDT"},"timeout":300000,"transformRequest":[null],"transformResponse":[null],"transitional":{"clarifyTimeoutError":false,"forcedJSONParsing":true,"silentJSONParsing":true},"url":"https://api.bybit.com/v5/position/list","xsrfCookieName":"XSRF-TOKEN","xsrfHeaderName":"X-XSRF-TOKEN"},"message":"❌ Ошибка при проверке состояния позиции: getaddrinfo ENOTFOUND api.bybit.com","stack":"Error: getaddrinfo ENOTFOUND api.bybit.com\n    at GetAddrInfoReqWrap.onlookup [as oncomplete] (node:dns:107:26)"}
+{"level":"error","message":"❌ Не удалось получить баланс USDT","timestamp":"2025-06-06T23:31:29.465Z"}
+{"level":"error","message":"❌ Не удалось получить баланс USDT","timestamp":"2025-06-06T23:31:29.659Z"}
+{"level":"error","message":"❌ Не удалось получить баланс USDT","timestamp":"2025-06-06T23:31:30.253Z"}
+{"level":"error","message":"❌ Не удалось получить баланс USDT","timestamp":"2025-06-06T23:33:05.668Z"}
+{"level":"error","message":"❌ Не удалось получить баланс USDT","timestamp":"2025-06-06T23:33:05.857Z"}
+{"level":"error","message":"❌ Не удалось получить баланс USDT","timestamp":"2025-06-06T23:33:06.050Z"}
+{"level":"error","message":"❌ Ошибка получения баланса: accountType only support UNIFIED.","timestamp":"2025-06-06T23:37:12.926Z"}
+{"level":"error","message":"❌ Ошибка получения баланса: accountType only support UNIFIED.","timestamp":"2025-06-06T23:37:13.115Z"}
+{"level":"error","message":"❌ Ошибка получения баланса: accountType only support UNIFIED.","timestamp":"2025-06-06T23:37:13.500Z"}
+{"level":"error","message":"❌ Ошибка получения баланса: accountType only support UNIFIED.","timestamp":"2025-06-06T23:37:13.927Z"}
+{"level":"error","message":"❌ Недостаточно средств! Доступно: 0.00 USDT, требуется: 8.00 USDT","timestamp":"2025-06-06T23:39:38.587Z"}
+{"level":"error","message":"❌ Недостаточно средств! Доступно: 0.00 USDT, требуется: 8.00 USDT","timestamp":"2025-06-06T23:39:38.966Z"}
+{"level":"error","message":"❌ Недостаточно средств! Доступно: 0.00 USDT, требуется: 8.00 USDT","timestamp":"2025-06-06T23:39:39.546Z"}
+{"level":"error","message":"❌ Недостаточно средств! Доступно: 0.00 USDT, требуется: 8.00 USDT","timestamp":"2025-06-06T23:39:39.930Z"}
+{"level":"error","message":"❌ Ордер b7f6c402-dd37-4a7f-9b33-0a11d14946c4 отменен/отклонен: Cancelled","timestamp":"2025-06-07T00:04:28.345Z"}
+{"level":"error","message":"❌ Ордер b7f6c402-dd37-4a7f-9b33-0a11d14946c4 не исполнен после 10 попыток, отменяем","timestamp":"2025-06-07T00:04:28.345Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:49:23.192Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:49:23.764Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:49:24.329Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:49:24.899Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:49:25.465Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:49:26.028Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:49:26.587Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:49:27.167Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:49:27.758Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:49:28.369Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:49:51.852Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:49:52.421Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:49:52.979Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:49:53.540Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:49:54.141Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:49:54.706Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:49:55.269Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:49:55.835Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:49:56.404Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:49:56.977Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:50:01.778Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:50:02.348Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:50:02.921Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:50:03.494Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:50:04.069Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:50:04.636Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:50:05.235Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:50:05.847Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:50:06.765Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:50:07.336Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:50:48.185Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:50:48.757Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:50:49.306Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:50:49.868Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:50:50.436Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:50:51.045Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:50:51.616Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:50:52.203Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:50:52.789Z"}
+{"level":"error","message":"❌ Получено недостаточно свечей: 1, нужно минимум 3","timestamp":"2025-06-07T13:50:53.356Z"}

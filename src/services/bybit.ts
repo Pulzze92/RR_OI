@@ -28,9 +28,10 @@ export class BybitService {
   private readonly TRADE_SIZE_USD = 5000;
   private readonly TAKE_PROFIT_POINTS = 4;
   private readonly STOP_LOSS_POINTS = 2;
-  private readonly TRAILING_ACTIVATION_POINTS = 2;
-  private readonly TRAILING_DISTANCE = 1.5;
-  private readonly VOLUME_THRESHOLD = 1000000;
+  private readonly TRAILING_ACTIVATION_POINTS = 1.5;
+  private readonly TRAILING_DISTANCE = 0.5;
+  private readonly VOLUME_THRESHOLD = 100000;
+  private readonly USE_TRAILING_STOP: boolean = false; // Явно указываем тип boolean
 
   private onTradeUpdate: (message: string) => void;
   private onSignalUpdate: (message: string) => void;
@@ -43,7 +44,8 @@ export class BybitService {
     apiSecret: string,
     onTradeUpdate: (message: string) => void,
     onSignalUpdate: (message: string) => void,
-    volumeMultiplierParam?: number
+    volumeMultiplierParam?: number,
+    useTrailingStop: boolean = false // Новый параметр
   ) {
     this.apiKey = apiKey;
     this.apiSecret = apiSecret;
@@ -54,6 +56,7 @@ export class BybitService {
     });
     this.onTradeUpdate = onTradeUpdate;
     this.onSignalUpdate = onSignalUpdate;
+    this.USE_TRAILING_STOP = useTrailingStop;
 
     this.notificationService = new NotificationService(
       this.SYMBOL,
@@ -77,7 +80,8 @@ export class BybitService {
         stopLossPoints: this.STOP_LOSS_POINTS,
         trailingActivationPoints: this.TRAILING_ACTIVATION_POINTS,
         trailingDistance: this.TRAILING_DISTANCE,
-        volumeThreshold: this.VOLUME_THRESHOLD
+        volumeThreshold: this.VOLUME_THRESHOLD,
+        useTrailingStop: this.USE_TRAILING_STOP // Передаем параметр
       }
     );
   }
@@ -130,7 +134,7 @@ export class BybitService {
 
   private async loadInitialCandleHistory(): Promise<Candle[]> {
     try {
-      const limit = Math.min(this.RETROSPECTIVE_ANALYSIS_SIZE, 200);
+      const limit = 3; // Запрашиваем 3 свечи (2 закрытые + 1 текущая)
       const endTime = Date.now();
       const startTime = endTime - this.INITIAL_HISTORY_HOURS * 60 * 60 * 1000;
 
@@ -169,16 +173,18 @@ export class BybitService {
           })
           .sort((a, b) => a.timestamp - b.timestamp);
 
-        // Логируем только последние 3 свечи для диагностики контекста
-        logger.info(
-          `🔍 КОНТЕКСТ АНАЛИЗА - Последние ${Math.min(
-            3,
-            allCandles.length
-          )} свечи:`
-        );
-        allCandles.slice(-3).forEach(candle => {
+        if (allCandles.length < 3) {
+          logger.error(
+            `❌ Получено недостаточно свечей: ${allCandles.length}, нужно минимум 3`
+          );
+          throw new Error("Insufficient candles received");
+        }
+
+        // Логируем все полученные свечи для диагностики
+        logger.info(`🔍 КОНТЕКСТ АНАЛИЗА - Все полученные свечи:`);
+        allCandles.forEach(candle => {
           logger.info(
-            `   ${new Date(candle.timestamp).toISOString()}: ${
+            `   ${new Date(candle.timestamp).toLocaleTimeString()}: ${
               candle.isGreen ? "🟢" : "🔴"
             } Open=${candle.open} Close=${
               candle.close
@@ -186,12 +192,25 @@ export class BybitService {
           );
         });
 
-        // Сохраняем только последние CANDLE_HISTORY_SIZE свечей для рабочей истории
-        this.candleHistory = allCandles.slice(-this.CANDLE_HISTORY_SIZE);
+        // Берем две последние ЗАКРЫТЫЕ свечи (исключая текущую формирующуюся)
+        const lastTwoClosedCandles = allCandles.slice(-3, -1);
 
-        // Возвращаем все свечи для ретроспективного анализа
+        logger.info(`🔍 Для анализа берем две последние ЗАКРЫТЫЕ свечи:`);
+        lastTwoClosedCandles.forEach(candle => {
+          logger.info(
+            `   ${new Date(candle.timestamp).toLocaleTimeString()}: ${
+              candle.isGreen ? "🟢" : "🔴"
+            } Open=${candle.open} Close=${
+              candle.close
+            } Vol=${candle.volume.toFixed(2)}`
+          );
+        });
+
+        // Сохраняем все 3 свечи для истории
+        this.candleHistory = allCandles;
+
         logger.info(
-          `Загружено ${allCandles.length} свечей для ретроспективного анализа, рабочая история: ${this.candleHistory.length} свечей`
+          `Загружено ${allCandles.length} свечей, для анализа используем 2 последние закрытые`
         );
         return allCandles;
       } else {
@@ -216,39 +235,49 @@ export class BybitService {
       "🔍 Начинаем ретроспективный анализ для поиска активных сигналов..."
     );
 
-    if (allCandles.length < 2) {
+    if (allCandles.length < 3) {
       logger.info("Недостаточно свечей для ретроспективного анализа");
       return;
     }
 
-    // Анализируем свечи в обратном порядке (от новых к старым)
-    for (let i = allCandles.length - 1; i > 0; i--) {
-      const currentCandle = allCandles[i];
-      const previousCandle = allCandles[i - 1];
+    // Берем две последние ЗАКРЫТЫЕ свечи (исключая текущую формирующуюся)
+    const lastClosedCandle = allCandles[allCandles.length - 2];
+    const previousClosedCandle = allCandles[allCandles.length - 3];
 
-      if (!currentCandle.confirmed || !previousCandle.confirmed) {
-        logger.info(
-          `⏳ Пропуск незавершенной свечи в истории (${new Date(
-            currentCandle.timestamp
-          ).toLocaleTimeString()})`
-        );
-        continue;
-      }
+    if (!lastClosedCandle.confirmed || !previousClosedCandle.confirmed) {
+      logger.info(`⏳ Пропуск незавершенной свечи в истории`);
+      return;
+    }
 
-      // Проверяем объем для обнаружения сигналов
-      this.tradingLogicService.checkVolumeSpike(currentCandle, previousCandle);
+    logger.info("📊 АНАЛИЗ ОБЪЕМОВ ЗАКРЫТЫХ СВЕЧЕЙ:");
+    logger.info(
+      `   📈 Последняя закрытая (${new Date(
+        lastClosedCandle.timestamp
+      ).toLocaleTimeString()}): V=${lastClosedCandle.volume.toFixed(2)}, ${
+        lastClosedCandle.isGreen ? "🟢" : "🔴"
+      }`
+    );
+    logger.info(
+      `   📈 Предыдущая закрытая (${new Date(
+        previousClosedCandle.timestamp
+      ).toLocaleTimeString()}): V=${previousClosedCandle.volume.toFixed(2)}, ${
+        previousClosedCandle.isGreen ? "🟢" : "🔴"
+      }`
+    );
+    logger.info(`   🎯 Порог объема: ${this.VOLUME_THRESHOLD}`);
 
-      // Если найден сигнал, проверяем следующую свечу как подтверждающую
-      if (this.tradingLogicService.getCurrentSignal()?.isActive) {
-        // Проверяем следующую свечу после сигнальной
-        if (i + 1 < allCandles.length) {
-          const confirmingCandle = allCandles[i + 1];
-          await this.tradingLogicService.processCompletedCandle(
-            confirmingCandle,
-            allCandles
-          );
-        }
-      }
+    // Проверяем объем для обнаружения сигналов
+    this.tradingLogicService.checkVolumeSpike(
+      lastClosedCandle,
+      previousClosedCandle
+    );
+
+    // Если найден сигнал, проверяем следующую свечу как подтверждающую
+    if (this.tradingLogicService.getCurrentSignal()?.isActive) {
+      await this.tradingLogicService.processCompletedCandle(
+        lastClosedCandle,
+        [previousClosedCandle, lastClosedCandle] // Передаем только две закрытые свечи
+      );
     }
   }
 
