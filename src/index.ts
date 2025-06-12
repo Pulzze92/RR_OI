@@ -1,62 +1,75 @@
-import dotenv from 'dotenv';
-import { BybitService } from './services/bybit';
-import { TelegramService } from './services/telegram';
-import { logger } from './utils/logger';
+import dotenv from "dotenv";
+import { BybitService } from "./services/bybit";
+import { TelegramService } from "./services/telegram";
+import { logger } from "./utils/logger";
 
 dotenv.config();
 
 const {
-    BYBIT_API_KEY,
-    BYBIT_API_SECRET,
-    TELEGRAM_BOT_TOKEN,
-    TELEGRAM_CHAT_ID,
-    VOLUME_MULTIPLIER
+  BYBIT_API_KEY,
+  BYBIT_API_SECRET,
+  TELEGRAM_BOT_TOKEN,
+  TELEGRAM_CHAT_ID
 } = process.env;
 
-if (!BYBIT_API_KEY || !BYBIT_API_SECRET || !TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
-    throw new Error('Missing required environment variables');
+if (
+  !BYBIT_API_KEY ||
+  !BYBIT_API_SECRET ||
+  !TELEGRAM_BOT_TOKEN ||
+  !TELEGRAM_CHAT_ID
+) {
+  throw new Error("Missing required environment variables");
 }
 
 async function main() {
-    try {
-        const volumeMultiplier = Number(VOLUME_MULTIPLIER) || 4;
-        
-        const bybitService = new BybitService(
-            BYBIT_API_KEY as string,
-            BYBIT_API_SECRET as string,
-            volumeMultiplier
-        );
+  try {
+    const telegramService = new TelegramService(
+      TELEGRAM_BOT_TOKEN as string,
+      TELEGRAM_CHAT_ID as string
+    );
 
-        const telegramService = new TelegramService(
-            TELEGRAM_BOT_TOKEN as string,
-            TELEGRAM_CHAT_ID as string
-        );
+    const handleTradeUpdate = async (message: string) => {
+      await telegramService.sendMessage(message);
+      logger.info("Trade update notification sent via Telegram.");
+    };
 
-        // Подключаем обработчики событий
-        bybitService.onVolumeSpike = async (message: string) => {
-            await telegramService.sendMessage(message);
-            logger.info('Volume spike detected and notification sent');
-        };
+    const handleSignalUpdate = async (message: string) => {
+      await telegramService.sendMessage(message);
+      logger.info("Signal update notification sent via Telegram.");
+    };
 
-        bybitService.onTradeOpen = async (message: string) => {
-            await telegramService.sendMessage(message);
-            logger.info('Trade opened and notification sent');
-        };
+    const bybitService = new BybitService(
+      BYBIT_API_KEY as string,
+      BYBIT_API_SECRET as string,
+      handleTradeUpdate,
+      handleSignalUpdate,
+      undefined,
+      true
+    );
 
-        // Подписываемся на BTCUSDT
-        await bybitService.subscribeToSymbol();
-        
-        logger.info('Bot started successfully');
+    await bybitService.start();
 
-        // Держим процесс активным
-        process.on('SIGINT', async () => {
-            logger.info('Shutting down...');
-            process.exit(0);
-        });
-    } catch (error) {
-        logger.error('Failed to start bot:', error);
-        process.exit(1);
-    }
+    logger.info("Bot started successfully after BybitService initialization.");
+
+    process.on("SIGINT", async () => {
+      logger.info("Shutting down...");
+      bybitService.stop();
+      process.exit(0);
+    });
+
+    process.on("uncaughtException", error => {
+      logger.error("Uncaught Exception:", error);
+      process.exit(1);
+    });
+
+    process.on("unhandledRejection", (reason, promise) => {
+      logger.error("Unhandled Rejection at:", promise, "reason:", reason);
+      process.exit(1);
+    });
+  } catch (error) {
+    logger.error("Failed to start bot:", error);
+    process.exit(1);
+  }
 }
 
-main(); 
+main();

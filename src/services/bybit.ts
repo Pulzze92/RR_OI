@@ -1,643 +1,529 @@
-import { RestClientV5, WebsocketClient, WSClientConfigurableOptions, OrderSideV5 } from 'bybit-api';
-import { logger } from '../utils/logger';
-import { Candle, VolumeSignal } from '../types/candle';
-
-const CANDLE_HISTORY_SIZE = 4;
-const INITIAL_HISTORY_HOURS = 1;
-const CANDLE_INTERVAL = '15';
-const WS_MARKET = 'v5';
-const CATEGORY = 'linear';
-
-type WSEventHandler = (data: any) => void;
-type WSErrorHandler = (error: unknown) => void;
-type WSCloseHandler = () => void;
+import { RestClientV5, WebsocketClient, WsKey, WS_KEY_MAP } from "bybit-api";
+import { logger } from "../utils/logger";
+import { Candle } from "./bybit.types";
+import { NotificationService } from "./notificationService";
+import {
+  TradingLogicService,
+  TradingLogicCallbacks
+} from "./tradingLogicService";
 
 export class BybitService {
-    private wsClient!: WebsocketClient;
-    private readonly client: RestClientV5;
-    private readonly SYMBOL = 'BTCUSDT';
-    private readonly TRADE_SIZE_USD = 15000;
-    private readonly TAKE_PROFIT_POINTS = 150;
-    private readonly STOP_LOSS_POINTS = 170;
-    private readonly TRAILING_ACTIVATION_POINTS = 140;  // Изменено для активации до ТП (было 150)
-    private readonly TRAILING_DISTANCE = 50;           // Расстояние трейлинга от цены
-    private candleHistory: Candle[] = [];
-    private currentSignal: VolumeSignal | null = null;
-    private readonly volumeMultiplier: number;
-    private readonly apiKey: string;
-    private readonly apiSecret: string;
-    private lastLogTime: number = 0;
-    private readonly LOG_INTERVAL = 5 * 60 * 1000;
-    private trailingStopInterval: NodeJS.Timeout | null = null;
-    private activePosition: {
-        side: OrderSideV5;
-        entryPrice: number;
-        entryTime: number;
-        isTrailingActive: boolean;
-        lastTrailingStopPrice: number | null;
-    } | null = null;
+  private wsClient!: WebsocketClient;
+  private readonly client: RestClientV5;
+  private candleHistory: Candle[] = [];
+  private lastLogTime: number = 0;
+  private restCheckInterval: NodeJS.Timeout | null = null;
+  private readonly REST_CHECK_INTERVAL = 5 * 60 * 1000; // 5 минут
 
-    constructor(
-        apiKey: string,
-        apiSecret: string,
-        volumeMultiplier: number = 4
-    ) {
-        if (!apiKey || !apiSecret) {
-            throw new Error('API ключи не предоставлены');
+  private readonly apiKey: string;
+  private readonly apiSecret: string;
+
+  private readonly SYMBOL = "SOLUSDT";
+  private readonly CANDLE_INTERVAL: string = "60";
+  private readonly CANDLE_HISTORY_SIZE = 6;
+  private readonly INITIAL_HISTORY_HOURS = 48;
+  private readonly LOG_INTERVAL = 15 * 60 * 1000;
+  private readonly RETROSPECTIVE_ANALYSIS_SIZE = 12;
+
+  private readonly TRADE_SIZE_USD = 5000;
+  private readonly TAKE_PROFIT_POINTS = 3;
+  private readonly STOP_LOSS_POINTS = 3;
+  private readonly TRAILING_ACTIVATION_POINTS = 1;
+  private readonly TRAILING_DISTANCE = 0.5;
+  private readonly VOLUME_THRESHOLD = 600000;
+  private readonly USE_TRAILING_STOP: boolean = false; // Явно указываем тип boolean
+
+  private onTradeUpdate: (message: string) => void;
+  private onSignalUpdate: (message: string) => void;
+
+  private notificationService: NotificationService;
+  private tradingLogicService: TradingLogicService;
+
+  constructor(
+    apiKey: string,
+    apiSecret: string,
+    onTradeUpdate: (message: string) => void,
+    onSignalUpdate: (message: string) => void,
+    volumeMultiplierParam?: number,
+    useTrailingStop: boolean = false // Новый параметр
+  ) {
+    this.apiKey = apiKey;
+    this.apiSecret = apiSecret;
+    this.client = new RestClientV5({
+      key: apiKey,
+      secret: apiSecret,
+      recv_window: 5000
+    });
+    this.onTradeUpdate = onTradeUpdate;
+    this.onSignalUpdate = onSignalUpdate;
+    this.USE_TRAILING_STOP = useTrailingStop;
+
+    this.notificationService = new NotificationService(
+      this.SYMBOL,
+      this.TRADE_SIZE_USD,
+      this.STOP_LOSS_POINTS
+    );
+
+    const tradingLogicCallbacks: TradingLogicCallbacks = {
+      onTradeOperation: this.onTradeUpdate,
+      onSignalDetected: this.onSignalUpdate
+    };
+
+    this.tradingLogicService = new TradingLogicService(
+      this.client,
+      this.notificationService,
+      tradingLogicCallbacks,
+      {
+        symbol: this.SYMBOL,
+        tradeSizeUsd: this.TRADE_SIZE_USD,
+        takeProfitPoints: this.TAKE_PROFIT_POINTS,
+        stopLossPoints: this.STOP_LOSS_POINTS,
+        trailingActivationPoints: this.TRAILING_ACTIVATION_POINTS,
+        trailingDistance: this.TRAILING_DISTANCE,
+        volumeThreshold: this.VOLUME_THRESHOLD,
+        useTrailingStop: this.USE_TRAILING_STOP // Передаем параметр
+      }
+    );
+  }
+
+  public async start(): Promise<void> {
+    try {
+      // Загружаем минимум последних свечей для корректного анализа объемов
+      const allCandles = await this.loadInitialCandleHistory();
+
+      // Анализируем историю для поиска сигналов
+      await this.performRetrospectiveAnalysis(allCandles);
+
+      // Синхронизируем состояние позиций при запуске
+      await this.tradingLogicService.syncPositionState(allCandles);
+
+      // Анализируем только ПОСЛЕДНЮЮ завершенную свечу для контекста
+      await this.analyzeLastCandle();
+
+      // Завершаем начальный анализ истории
+      this.tradingLogicService.finishInitialHistoryAnalysis();
+
+      this.subscribeToCandleUpdates();
+      const startMessage =
+        `🤖 БОТ ЗАПУЩЕН\n\n` +
+        `📊 Торговая пара: ${this.SYMBOL}\n` +
+        `💰 Размер позиции: $${this.TRADE_SIZE_USD}\n` +
+        `⏱️ Таймфрейм: ${this.CANDLE_INTERVAL}h\n` +
+        `📥 Загружено свечей для анализа: ${this.candleHistory.length}\n` +
+        `🚫 Ретроспективный поиск сигналов отключен`;
+      this.onTradeUpdate(startMessage);
+      logger.info(
+        "Сервис Bybit инициализирован, подписан на обновления свечей и стартовое сообщение отправлено."
+      );
+    } catch (error) {
+      logger.error("Ошибка инициализации сервиса Bybit:", error);
+      throw error;
+    }
+  }
+
+  public stop(): void {
+    if (this.wsClient) {
+      this.wsClient.close(WS_KEY_MAP.linearPublic);
+    }
+    if (this.restCheckInterval) {
+      clearInterval(this.restCheckInterval);
+      this.restCheckInterval = null;
+    }
+    logger.info("Сервис Bybit остановлен");
+  }
+
+  private async loadInitialCandleHistory(): Promise<Candle[]> {
+    try {
+      const limit = 3; // Запрашиваем 3 свечи (2 закрытые + 1 текущая)
+      const endTime = Date.now();
+      const startTime = endTime - this.INITIAL_HISTORY_HOURS * 60 * 60 * 1000;
+
+      const response = await this.client.getKline({
+        category: "linear",
+        symbol: this.SYMBOL,
+        interval: this.CANDLE_INTERVAL as any,
+        start: startTime,
+        end: endTime,
+        limit: limit
+      });
+
+      if (response.retCode === 0 && response.result && response.result.list) {
+        const allCandles = response.result.list
+          .map(k => {
+            const timestamp = Number(k[0]);
+            const open = Number(k[1]);
+            const high = Number(k[2]);
+            const low = Number(k[3]);
+            const close = Number(k[4]);
+            const volume = Number(k[5]);
+            const turnover = Number(k[6]);
+            const isGreen = close >= open;
+
+            return {
+              timestamp,
+              open,
+              high,
+              low,
+              close,
+              volume,
+              turnover,
+              confirmed: true,
+              isGreen
+            };
+          })
+          .sort((a, b) => a.timestamp - b.timestamp);
+
+        if (allCandles.length < 3) {
+          logger.error(
+            `❌ Получено недостаточно свечей: ${allCandles.length}, нужно минимум 3`
+          );
+          throw new Error("Insufficient candles received");
         }
 
-        this.volumeMultiplier = volumeMultiplier;
-        this.apiKey = apiKey;
-        this.apiSecret = apiSecret;
-
-        this.client = new RestClientV5({
-            key: apiKey,
-            secret: apiSecret,
-            testnet: false
+        // Логируем все полученные свечи для диагностики
+        logger.info(`🔍 КОНТЕКСТ АНАЛИЗА - Все полученные свечи:`);
+        allCandles.forEach(candle => {
+          logger.info(
+            `   ${new Date(candle.timestamp).toLocaleTimeString()}: ${
+              candle.isGreen ? "🟢" : "🔴"
+            } Open=${candle.open} Close=${
+              candle.close
+            } Vol=${candle.volume.toFixed(2)}`
+          );
         });
 
-        this.initializeWebSocket();
+        // Берем две последние ЗАКРЫТЫЕ свечи (исключая текущую формирующуюся)
+        const lastTwoClosedCandles = allCandles.slice(-3, -1);
+
+        logger.info(`🔍 Для анализа берем две последние ЗАКРЫТЫЕ свечи:`);
+        lastTwoClosedCandles.forEach(candle => {
+          logger.info(
+            `   ${new Date(candle.timestamp).toLocaleTimeString()}: ${
+              candle.isGreen ? "🟢" : "🔴"
+            } Open=${candle.open} Close=${
+              candle.close
+            } Vol=${candle.volume.toFixed(2)}`
+          );
+        });
+
+        // Сохраняем все 3 свечи для истории
+        this.candleHistory = allCandles;
+
+        logger.info(
+          `Загружено ${allCandles.length} свечей, для анализа используем 2 последние закрытые`
+        );
+        return allCandles;
+      } else {
+        logger.error(
+          "Не удалось загрузить начальную историю свечей:",
+          response.retMsg
+        );
+        throw new Error(
+          "Failed to load initial candle history: " + response.retMsg
+        );
+      }
+    } catch (error) {
+      logger.error("Ошибка при загрузке истории свечей:", error);
+      throw error;
+    }
+  }
+
+  private async performRetrospectiveAnalysis(
+    allCandles: Candle[]
+  ): Promise<void> {
+    logger.info(
+      "🔍 Начинаем ретроспективный анализ для поиска активных сигналов..."
+    );
+
+    if (allCandles.length < 3) {
+      logger.info("Недостаточно свечей для ретроспективного анализа");
+      return;
     }
 
-    private initializeWebSocket(): void {
-        const wsConfig: WSClientConfigurableOptions = {
-            key: this.apiKey,
-            secret: this.apiSecret,
-            market: WS_MARKET,
-            testnet: false
-        };
+    // Берем две последние ЗАКРЫТЫЕ свечи (исключая текущую формирующуюся)
+    const lastClosedCandle = allCandles[allCandles.length - 2];
+    const previousClosedCandle = allCandles[allCandles.length - 3];
 
-        this.wsClient = new WebsocketClient(wsConfig);
-        this.setupWebSocketHandlers();
+    if (!lastClosedCandle.confirmed || !previousClosedCandle.confirmed) {
+      logger.info(`⏳ Пропуск незавершенной свечи в истории`);
+      return;
     }
 
-    private setupWebSocketHandlers(): void {
-        (this.wsClient as any).on('update', ((data: any) => {
-            if (data.topic?.startsWith('kline')) {
-                this.handleKlineUpdate(data);
+    logger.info("📊 АНАЛИЗ ОБЪЕМОВ ЗАКРЫТЫХ СВЕЧЕЙ:");
+    logger.info(
+      `   📈 Последняя закрытая (${new Date(
+        lastClosedCandle.timestamp
+      ).toLocaleTimeString()}): V=${lastClosedCandle.volume.toFixed(2)}, ${
+        lastClosedCandle.isGreen ? "🟢" : "🔴"
+      }`
+    );
+    logger.info(
+      `   📈 Предыдущая закрытая (${new Date(
+        previousClosedCandle.timestamp
+      ).toLocaleTimeString()}): V=${previousClosedCandle.volume.toFixed(2)}, ${
+        previousClosedCandle.isGreen ? "🟢" : "🔴"
+      }`
+    );
+    logger.info(`   🎯 Порог объема: ${this.VOLUME_THRESHOLD}`);
+
+    // Проверяем объем для обнаружения сигналов
+    this.tradingLogicService.checkVolumeSpike(
+      lastClosedCandle,
+      previousClosedCandle
+    );
+
+    // Если найден сигнал, проверяем следующую свечу как подтверждающую
+    if (this.tradingLogicService.getCurrentSignal()?.isActive) {
+      await this.tradingLogicService.processCompletedCandle(
+        lastClosedCandle,
+        [previousClosedCandle, lastClosedCandle] // Передаем только две закрытые свечи
+      );
+    }
+  }
+
+  private subscribeToCandleUpdates(): void {
+    this.wsClient = new WebsocketClient({
+      key: this.apiKey,
+      secret: this.apiSecret,
+      market: "v5",
+
+      // Увеличиваем интервал проверки соединения до 30 секунд
+      pingInterval: 30000,
+
+      // Увеличиваем таймаут ожидания pong до 10 секунд
+      pongTimeout: 10000,
+
+      // Увеличиваем задержку перед переподключением до 3 секунд
+      reconnectTimeout: 3000
+    });
+
+    this.wsClient.subscribeV5(
+      [`kline.${this.CANDLE_INTERVAL}.${this.SYMBOL}`],
+      "linear"
+    );
+
+    this.wsClient.on("update", (data: any) => {
+      if (data.topic && data.topic.startsWith("kline")) {
+        const candleData = data.data[0];
+        this.updateCandleHistory({
+          timestamp: Number(candleData.start),
+          open: Number(candleData.open),
+          high: Number(candleData.high),
+          low: Number(candleData.low),
+          close: Number(candleData.close),
+          volume: Number(candleData.volume),
+          turnover: Number(candleData.turnover),
+          confirmed: candleData.confirm === true,
+          isGreen: Number(candleData.close) >= Number(candleData.open)
+        });
+      }
+    });
+
+    this.wsClient.on("close", () => {
+      logger.info(
+        "Соединение WebSocket закрыто. Попытка переподключения через 5 секунд..."
+      );
+      setTimeout(() => {
+        logger.info("Переподключение WebSocket...");
+        this.subscribeToCandleUpdates();
+      }, 5000);
+    });
+
+    this.wsClient.on("open", (evt: { wsKey: WsKey; event: any }) => {
+      logger.info(`Соединение WebSocket открыто. wsKey: ${evt.wsKey}`);
+    });
+
+    // Добавляем обработчик переподключения
+    this.wsClient.on("reconnect", ({ wsKey }: { wsKey: string }) => {
+      logger.info(`WebSocket переподключается... wsKey: ${wsKey}`);
+    });
+
+    this.wsClient.on("reconnected", (data: any) => {
+      logger.info(`WebSocket переподключен. wsKey: ${data?.wsKey}`);
+    });
+  }
+
+  private updateCandleHistory(newCandle: Candle): void {
+    const currentTime = Date.now();
+    if (currentTime - this.lastLogTime > this.LOG_INTERVAL) {
+      logger.info(
+        `Текущий объем формирующейся свечи (${new Date(
+          newCandle.timestamp
+        ).toLocaleTimeString()}): ${newCandle.volume.toFixed(2)}, Закрытие: ${
+          newCandle.close
+        }`
+      );
+      this.lastLogTime = currentTime;
+    }
+
+    const existingCandleIndex = this.candleHistory.findIndex(
+      c => c.timestamp === newCandle.timestamp
+    );
+
+    if (existingCandleIndex !== -1) {
+      this.candleHistory[existingCandleIndex] = newCandle;
+    } else {
+      logger.info(
+        `🆕 ПОЛУЧЕНА НОВАЯ СВЕЧА (${new Date(
+          newCandle.timestamp
+        ).toLocaleTimeString()}): O=${newCandle.open} H=${newCandle.high} L=${
+          newCandle.low
+        } C=${newCandle.close} V=${newCandle.volume.toFixed(2)}`
+      );
+      this.candleHistory.push(newCandle);
+      if (this.candleHistory.length > this.CANDLE_HISTORY_SIZE) {
+        this.candleHistory.shift();
+      }
+    }
+
+    this.candleHistory.sort((a, b) => a.timestamp - b.timestamp);
+
+    // Если это новая свеча (не обновление существующей)
+    if (existingCandleIndex === -1) {
+      logger.info(`📊 ИСТОРИЯ СВЕЧЕЙ ПОСЛЕ ДОБАВЛЕНИЯ НОВОЙ:`);
+      this.candleHistory.forEach((candle, index) => {
+        logger.info(
+          `   ${index}: ${new Date(
+            candle.timestamp
+          ).toLocaleTimeString()} V=${candle.volume.toFixed(2)} ${
+            candle.confirmed ? "✅" : "⏳"
+          }`
+        );
+      });
+
+      logger.info(
+        `🔄 Передаем новую свечу в TradingLogicService для проверки условий входа...`
+      );
+      this.tradingLogicService.processCompletedCandle(newCandle, [
+        ...this.candleHistory
+      ]);
+    }
+
+    if (newCandle.confirmed) {
+      logger.info(
+        `🕯️ ЗАВЕРШЕННАЯ свеча (${new Date(
+          newCandle.timestamp
+        ).toLocaleTimeString()}): O=${newCandle.open} H=${newCandle.high} L=${
+          newCandle.low
+        } C=${newCandle.close} V=${newCandle.volume.toFixed(2)}`
+      );
+
+      // Проверяем, что предыдущая свеча тоже подтверждена
+      const previousCandle = this.candleHistory[this.candleHistory.length - 2];
+      if (!previousCandle?.confirmed) {
+        logger.info(
+          `⏳ ПРОПУСК ОБРАБОТКИ: Предыдущая свеча (${new Date(
+            previousCandle?.timestamp
+          ).toLocaleTimeString()}) еще не подтверждена`
+        );
+        return;
+      }
+
+      this.processCompletedCandle(newCandle);
+    }
+  }
+
+  private processCompletedCandle(completedCandle: Candle): void {
+    if (this.candleHistory.length < 2) {
+      return;
+    }
+
+    const completedCandleActualIndex = this.candleHistory.findIndex(
+      c => c.timestamp === completedCandle.timestamp
+    );
+    if (completedCandleActualIndex < 1) {
+      logger.warn(
+        `Не найдена предыдущая свеча для анализа завершенной свечи ${new Date(
+          completedCandle.timestamp
+        ).toLocaleTimeString()}`
+      );
+      return;
+    }
+    const previousCandle = this.candleHistory[completedCandleActualIndex - 1];
+
+    this.tradingLogicService.checkVolumeSpike(completedCandle, previousCandle);
+    this.tradingLogicService.processCompletedCandle(completedCandle, [
+      ...this.candleHistory
+    ]);
+  }
+
+  public async getAccountBalance(): Promise<any> {
+    try {
+      const response = await this.client.getWalletBalance({
+        accountType: "UNIFIED"
+      });
+      if (
+        response.retCode === 0 &&
+        response.result.list &&
+        response.result.list.length > 0
+      ) {
+        return response.result.list[0];
+      }
+      logger.error(
+        "Ошибка при получении баланса или пустой список:",
+        response.retMsg
+      );
+      return null;
+    } catch (error) {
+      logger.error("Исключение при получении баланса:", error);
+      return null;
+    }
+  }
+
+  private async analyzeLastCandle(): Promise<void> {
+    if (this.candleHistory.length >= 3) {
+      logger.info(`🔍 Проверка последних свечей на готовые сигналы...`);
+
+      // Анализируем от НОВЫХ к СТАРЫМ
+      for (let i = this.candleHistory.length - 1; i > 0; i--) {
+        const currentCandle = this.candleHistory[i];
+        const previousCandle = this.candleHistory[i - 1];
+
+        // Пропускаем неподтвержденные свечи
+        if (!currentCandle.confirmed || !previousCandle.confirmed) {
+          logger.info(
+            `⏳ Пропуск неподтвержденных свечей: ${new Date(
+              currentCandle.timestamp
+            ).toLocaleTimeString()} и ${new Date(
+              previousCandle.timestamp
+            ).toLocaleTimeString()}`
+          );
+          continue;
+        }
+
+        logger.info(
+          `   Проверка свечи ${new Date(
+            currentCandle.timestamp
+          ).toLocaleTimeString()}: V=${currentCandle.volume.toFixed(2)}`
+        );
+
+        // Проверяем объем для обнаружения сигналов
+        this.tradingLogicService.checkVolumeSpike(
+          currentCandle,
+          previousCandle
+        );
+
+        // Если найден сигнал, проверяем следующую свечу как подтверждающую
+        if (this.tradingLogicService.getCurrentSignal()?.isActive) {
+          // Проверяем следующую свечу после сигнальной
+          if (i + 1 < this.candleHistory.length) {
+            const confirmingCandle = this.candleHistory[i + 1];
+            // Пропускаем неподтвержденную подтверждающую свечу
+            if (!confirmingCandle.confirmed) {
+              logger.info(
+                `⏳ Пропуск неподтвержденной подтверждающей свечи: ${new Date(
+                  confirmingCandle.timestamp
+                ).toLocaleTimeString()}`
+              );
+              continue;
             }
-        }) as WSEventHandler);
-
-        (this.wsClient as any).on('error', ((error: unknown) => {
-            logger.error('WebSocket error:', error);
-        }) as WSErrorHandler);
-
-        (this.wsClient as any).on('close', (() => {
-            logger.warn('WebSocket connection closed');
-            this.reconnect();
-        }) as WSCloseHandler);
-    }
-
-    private async reconnect(): Promise<void> {
-        logger.info('🔄 Попытка переподключения...');
-        try {
-            await this.wsClient.closeAll();
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            this.initializeWebSocket();
-            await this.subscribeToSymbol();
-        } catch (error) {
-            logger.error('❌ Ошибка переподключения:', error);
-            setTimeout(() => this.reconnect(), 5000);
+            await this.tradingLogicService.processCompletedCandle(
+              confirmingCandle,
+              this.candleHistory
+            );
+          }
         }
+      }
     }
-
-    private async initializeCandleHistory(): Promise<void> {
-        try {
-            logger.info(`📥 Загружаем начальную историю свечей для ${this.SYMBOL}`);
-            
-            const endTime = Date.now();
-            const startTime = endTime - (INITIAL_HISTORY_HOURS * 60 * 60 * 1000);
-
-            const response = await this.client.getKline({
-                category: CATEGORY,
-                symbol: this.SYMBOL,
-                interval: CANDLE_INTERVAL,
-                start: Math.floor(startTime),
-                end: Math.floor(endTime),
-                limit: CANDLE_HISTORY_SIZE
-            });
-
-            if (response.retCode === 0 && response.result.list) {
-                const candles: Candle[] = response.result.list.reverse().map((item) => this.mapKlineToCandle(item));
-                this.candleHistory = candles;
-                this.logInitialCandles(candles);
-            }
-        } catch (error) {
-            logger.error('❌ Ошибка при загрузке истории свечей:', error);
-            throw error;
-        }
-    }
-
-    private mapKlineToCandle(item: any[]): Candle {
-        return {
-            timestamp: Number(item[0]),
-            open: Number(item[1]),
-            high: Number(item[2]),
-            low: Number(item[3]),
-            close: Number(item[4]),
-            volume: Number(item[5]),
-            symbol: this.SYMBOL,
-            isGreen: Number(item[4]) >= Number(item[1]),
-            confirmed: true
-        };
-    }
-
-    private logInitialCandles(candles: Candle[]): void {
-        logger.info(`✅ Загружено ${candles.length} исторических свечей`);
-        
-        const lastCandle = candles[candles.length - 1];
-        const previousCandle = candles[candles.length - 2];
-        
-        if (lastCandle && previousCandle) {
-            logger.info('📊 Последние свечи:');
-            logger.info(`Предыдущая (${new Date(previousCandle.timestamp).toLocaleTimeString()}): объем ${previousCandle.volume.toFixed(2)}`);
-            logger.info(`Текущая (${new Date(lastCandle.timestamp).toLocaleTimeString()}): объем ${lastCandle.volume.toFixed(2)}`);
-        }
-    }
-
-    private handleKlineUpdate(data: any): void {
-        try {
-            const kline = data.data[0];
-            const symbol = data.topic.split('.')[2];
-
-            if (symbol !== this.SYMBOL) return;
-            
-            const candle = this.createCandleFromKline(kline);
-            this.updateCandleHistory(candle);
-            this.checkAndLogState(candle);
-        } catch (error) {
-            logger.error('❌ Ошибка обработки обновления свечи:', error);
-        }
-    }
-
-    private createCandleFromKline(kline: any): Candle {
-        const isConfirmed = kline.confirm === true || kline.confirm === 'true';
-        if (isConfirmed) {
-            logger.info(`✅ Получено подтверждение свечи ${new Date(Number(kline.start)).toLocaleTimeString()}`);
-        }
-        
-        return {
-            timestamp: Number(kline.start),
-            open: Number(kline.open),
-            high: Number(kline.high),
-            low: Number(kline.low),
-            close: Number(kline.close),
-            volume: Number(kline.volume),
-            symbol: this.SYMBOL,
-            isGreen: Number(kline.close) >= Number(kline.open),
-            confirmed: isConfirmed
-        };
-    }
-
-    private updateCandleHistory(candle: Candle): void {
-        const isNewCandle = this.candleHistory.length === 0 || 
-                          this.candleHistory[this.candleHistory.length - 1].timestamp !== candle.timestamp;
-
-        if (isNewCandle) {
-            if (this.candleHistory.length > 0) {
-                const lastCandle = this.candleHistory[this.candleHistory.length - 1];
-                if (!lastCandle.confirmed) {
-                    logger.warn(`⚠️ Предыдущая свеча не была подтверждена: ${new Date(lastCandle.timestamp).toLocaleTimeString()}`);
-                }
-                // Проверяем объем только у закрытой свечи
-                if (lastCandle.confirmed && this.candleHistory.length >= 2) {
-                    const previousCandle = this.candleHistory[this.candleHistory.length - 2];
-                    this.checkVolumeSpike(lastCandle, previousCandle);
-                }
-                this.processCompletedCandle(lastCandle, candle);
-            }
-            this.candleHistory.push(candle);
-            if (this.candleHistory.length > CANDLE_HISTORY_SIZE) {
-                this.candleHistory.shift();
-            }
-        } else {
-            // Обновляем текущую свечу
-            this.candleHistory[this.candleHistory.length - 1] = candle;
-            
-            // Убираем проверку объема при обновлении текущей свечи
-            // Теперь проверяем объем только после закрытия свечи
-        }
-
-        // Логируем текущее состояние
-        this.checkAndLogState(candle);
-    }
-
-    private checkAndLogState(currentCandle: Candle): void {
-        const currentTime = Date.now();
-        if (currentTime - this.lastLogTime >= this.LOG_INTERVAL) {
-            this.logCurrentState(currentCandle);
-            this.lastLogTime = currentTime;
-        }
-    }
-
-    private logCurrentState(currentCandle: Candle): void {
-        const previousCandle = this.candleHistory.length >= 2 ? 
-            this.candleHistory[this.candleHistory.length - 2] : null;
-        
-        if (this.currentSignal?.isActive) {
-            logger.info('📊 СТАТУС АКТИВНОГО СИГНАЛА:');
-            logger.info(`💰 Текущая цена: $${currentCandle.close}`);
-            logger.info(`📈 Текущий объем: ${currentCandle.volume.toFixed(2)}`);
-            
-            if (previousCandle) {
-                const volumeRatio = currentCandle.volume / previousCandle.volume;
-                logger.info(`📊 Соотношение с предыдущим объемом: ${volumeRatio.toFixed(2)}x`);
-            }
-
-            logger.info(`⏱️ Время сигнальной свечи: ${new Date(this.currentSignal.candle.timestamp).toLocaleTimeString()}`);
-            logger.info(`🎯 Ожидаем свечу с меньшим объемом для входа`);
-            logger.info('➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖');
-        }
-    }
-
-    private async processCompletedCandle(completedCandle: Candle, newCandle: Candle): Promise<void> {
-        if (!this.currentSignal?.isActive) {
-            return;
-        }
-
-        // Проверяем, что это не та же самая свеча, в которой был обнаружен сигнал
-        if (completedCandle.timestamp === this.currentSignal.candle.timestamp) {
-            logger.info(`⏳ Ожидаем следующую свечу после сигнальной (${new Date(completedCandle.timestamp).toLocaleTimeString()})`);
-            return;
-        }
-
-        if (this.currentSignal.waitingForLowerVolume && completedCandle.confirmed) {
-            logger.info(`🔍 Проверка завершенной свечи:`);
-            logger.info(`📊 Объем сигнальной свечи (C0): ${this.currentSignal.candle.volume.toFixed(2)}`);
-            logger.info(`📊 Объем следующей свечи (C+1): ${completedCandle.volume.toFixed(2)}`);
-            
-            // Проверяем только объем, без учета времени
-            if (completedCandle.confirmed && completedCandle.volume <= this.currentSignal.candle.volume) {
-                logger.info(`✅ УСЛОВИЯ ДЛЯ ВХОДА ВЫПОЛНЕНЫ:`);
-                logger.info(`📊 Объем сигнальной свечи (C0): ${this.currentSignal.candle.volume.toFixed(2)}`);
-                logger.info(`📊 Объем следующей свечи (C+1): ${completedCandle.volume.toFixed(2)}`);
-                logger.info(`📈 Соотношение объемов: ${(completedCandle.volume / this.currentSignal.candle.volume).toFixed(2)}x`);
-                
-                try {
-                    await this.openPosition(this.currentSignal.candle, completedCandle);
-                    this.currentSignal.isActive = false;
-                    this.currentSignal.waitingForLowerVolume = false;
-                } catch (error) {
-                    logger.error(`❌ Ошибка при открытии позиции:`, error);
-                }
-            } else if (!completedCandle.confirmed) {
-                logger.info(`⏳ Ожидаем подтверждения свечи`);
-            } else if (completedCandle.volume > this.currentSignal.candle.volume) {
-                logger.info(`⚠️ Объем следующей свечи (${completedCandle.volume.toFixed(2)}) выше сигнальной (${this.currentSignal.candle.volume.toFixed(2)}), пропускаем вход`);
-                // НЕ отменяем сигнал, продолжаем ждать свечу с подходящим объемом
-            }
-            logger.info('➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖');
-        }
-    }
-
-    private async openPosition(signalCandle: Candle, currentCandle: Candle): Promise<void> {
-        try {
-            const side: OrderSideV5 = signalCandle.isGreen ? 'Sell' : 'Buy';
-            
-            const stopLossLevel = side === 'Buy' ? 
-                Math.min(signalCandle.low, currentCandle.low) :    
-                Math.max(signalCandle.high, currentCandle.high);   
-
-            const stopLoss = side === 'Buy' ? 
-                stopLossLevel - this.STOP_LOSS_POINTS :   
-                stopLossLevel + this.STOP_LOSS_POINTS;    
-
-            const takeProfit = currentCandle.close + (side === 'Buy' ? 
-                this.TAKE_PROFIT_POINTS : 
-                -this.TAKE_PROFIT_POINTS);
-
-            const contractSize = (this.TRADE_SIZE_USD / currentCandle.close).toFixed(3);
-            const orderPrice = currentCandle.close.toString(); // Цена для лимитного ордера
-
-            logger.info(`🎯 Попытка открытия позиции (Лимитный ордер PostOnly):`);
-            logger.info(`📈 Направление: ${side} (сигнальная свеча ${signalCandle.isGreen ? 'зеленая' : 'красная'})`);
-            logger.info(`💰 Цена ордера: ${orderPrice}`);
-            logger.info(`🎯 Тейк-профит: ${takeProfit}`);
-            logger.info(`🛑 Стоп-лосс: ${stopLoss}`);
-            logger.info(`📊 Экстремумы свечей:`);
-            logger.info(`  Сигнальная (${signalCandle.isGreen ? 'зеленая' : 'красная'}): High=${signalCandle.high}, Low=${signalCandle.low}`);
-            logger.info(`  Текущая: High=${currentCandle.high}, Low=${currentCandle.low}`);
-            logger.info(`  Выбран ${side === 'Buy' ? 'минимум' : 'максимум'}: ${stopLossLevel}`);
-            logger.info(`  Стоп установлен на ${Math.abs(this.STOP_LOSS_POINTS)} пунктов ${side === 'Buy' ? 'ниже' : 'выше'}`);
-            logger.info(`📊 Размер позиции: $${this.TRADE_SIZE_USD} (${contractSize} контрактов)`);
-
-            const response = await this.client.submitOrder({
-                category: 'linear',
-                symbol: this.SYMBOL,
-                side: side,
-                orderType: 'Limit', // Изменено на Limit
-                qty: contractSize,
-                price: orderPrice, // Указана цена для лимитного ордера
-                timeInForce: 'PostOnly', // Ордер будет исполнен только как maker
-            });
-
-            logger.info(`📡 Ответ от API при открытии лимитной PostOnly позиции:`, response);
-
-            if (response.retCode === 0 && response.result && response.result.orderId) {
-                logger.info(`✅ Лимитный ордер PostOnly успешно размещен (orderId: ${response.result.orderId}). Предполагаемая цена входа: ${currentCandle.close}`);
-                logger.info(`🕒 Устанавливаю стоп-лосс и тейк-профит`);
-                
-                this.activePosition = {
-                    side: side,
-                    entryPrice: currentCandle.close, // Используем цену ордера как предполагаемую цену входа
-                    entryTime: currentCandle.timestamp,
-                    isTrailingActive: false,
-                    lastTrailingStopPrice: null
-                };
-
-                const tpSlResponse = await this.client.setTradingStop({
-                    category: 'linear',
-                    symbol: this.SYMBOL,
-                    takeProfit: takeProfit.toString(),
-                    stopLoss: stopLoss.toString(),
-                    positionIdx: 0,
-                    tpTriggerBy: 'MarkPrice',
-                    slTriggerBy: 'MarkPrice'
-                });
-
-                this.startTrailingStopCheck();
-
-                const message = this.formatTradeAlert(side, currentCandle.close, takeProfit, stopLoss, signalCandle, currentCandle, true);
-                this.onTradeOpen(message);
-                logger.info(`✅ Сделка (лимитный ордер) полностью оформлена и уведомление отправлено`);
-            } else {
-                logger.error(`❌ Лимитный ордер PostOnly не был размещен или был отменен. Код: ${response.retCode}, сообщение: ${response.retMsg}`);
-                // Позиция не открыта, никаких дальнейших действий не требуется
-            }
-        } catch (error) {
-            logger.error('❌ Ошибка при открытии лимитной позиции:', error);
-            if (error instanceof Error) {
-                logger.error('Детали ошибки:', error.message);
-                logger.error('Стек ошибки:', error.stack);
-            }
-        }
-    }
-
-    private formatTradeAlert(side: OrderSideV5, entry: number, takeProfit: number, stopLoss: number, signalCandle: Candle, currentCandle: Candle, isLimitOrder: boolean = false): string {
-        const contractSize = (this.TRADE_SIZE_USD / entry).toFixed(3);
-        const stopLossLevel = signalCandle.isGreen ? 
-            Math.max(signalCandle.high, currentCandle.high) :
-            Math.min(signalCandle.low, currentCandle.low);
-            
-        return `🎯 ${isLimitOrder ? 'ЛИМИТНЫЙ ОРДЕР РАЗМЕЩЕН' : 'ОТКРЫТА НОВАЯ СДЕЛКА'} ${this.SYMBOL}\n\n` +
-               `${side === 'Buy' ? '📈 ЛОНГ' : '📉 ШОРТ'}\n` +
-               `💵 ${isLimitOrder ? 'Цена ордера' : 'Цена входа'}: ${entry}\n` +
-               `🎯 Тейк-профит: ${takeProfit}\n` +
-               `🛑 Стоп-лосс: ${stopLoss}\n` +
-               `📊 Расчет стопа:\n` +
-               `  • Сигнальная свеча (${signalCandle.isGreen ? '🟢' : '🔴'}): ${signalCandle.isGreen ? `High=${signalCandle.high}` : `Low=${signalCandle.low}`}\n` +
-               `  • Текущая свеча: ${signalCandle.isGreen ? `High=${currentCandle.high}` : `Low=${currentCandle.low}`}\n` +
-               `  • Выбран ${signalCandle.isGreen ? 'максимум' : 'минимум'}: ${stopLossLevel}\n` +
-               `  • Стоп: ${Math.abs(this.STOP_LOSS_POINTS)} пунктов ${signalCandle.isGreen ? 'выше' : 'ниже'}\n` +
-               `💰 Размер позиции: $${this.TRADE_SIZE_USD} (${contractSize} BTC)\n` +
-               `📊 Потенциальная прибыль: $${((Math.abs(takeProfit - entry) / entry) * this.TRADE_SIZE_USD).toFixed(2)}\n` +
-               `⚠️ Максимальный убыток: $${((Math.abs(stopLoss - entry) / entry) * this.TRADE_SIZE_USD).toFixed(2)}`;
-    }
-
-    private async closePosition(candle: Candle, reason: string): Promise<void> {
-        if (!this.activePosition) return;
-
-        try {
-            // Останавливаем проверку трейлинг-стопа
-            this.stopTrailingStopCheck();
-            
-            // Закрываем позицию противоположным ордером
-            const closeSide: OrderSideV5 = this.activePosition.side === 'Buy' ? 'Sell' : 'Buy';
-            const contractSize = (this.TRADE_SIZE_USD / candle.close).toFixed(3);
-
-            logger.info(`🚨 Закрытие позиции по причине: ${reason}`);
-            logger.info(`📊 Направление закрытия: ${closeSide}`);
-            logger.info(`💰 Цена закрытия: ${candle.close}`);
-
-            const response = await this.client.submitOrder({
-                category: 'linear',
-                symbol: this.SYMBOL,
-                side: closeSide,
-                orderType: 'Market',
-                qty: contractSize,
-                timeInForce: 'GTC'
-            });
-
-            if (response.retCode === 0) {
-                const profit = this.activePosition.side === 'Buy' ? 
-                    candle.close - this.activePosition.entryPrice :
-                    this.activePosition.entryPrice - candle.close;
-                
-                const profitPercent = (profit / this.activePosition.entryPrice) * 100;
-                const profitUSD = (profit / this.activePosition.entryPrice) * this.TRADE_SIZE_USD;
-
-                const message = `🔄 ПОЗИЦИЯ ЗАКРЫТА ${this.SYMBOL}\n\n` +
-                    `${this.activePosition.side === 'Buy' ? '📈 ЛОНГ' : '📉 ШОРТ'}\n` +
-                    `💵 Цена входа: ${this.activePosition.entryPrice}\n` +
-                    `💰 Цена выхода: ${candle.close}\n` +
-                    `📊 Прибыль/Убыток: $${profitUSD.toFixed(2)} (${profitPercent.toFixed(2)}%)\n` +
-                    `⚠️ Причина закрытия: ${reason}`;
-
-                this.onTradeOpen(message);
-                logger.info(`✅ Позиция успешно закрыта`);
-                this.activePosition = null;
-            } else {
-                logger.error(`❌ Ошибка при закрытии позиции, код: ${response.retCode}, сообщение: ${response.retMsg}`);
-            }
-        } catch (error) {
-            logger.error('❌ Ошибка при закрытии позиции:', error);
-            if (error instanceof Error) {
-                logger.error('Детали ошибки:', error.message);
-                logger.error('Стек ошибки:', error.stack);
-            }
-        }
-    }
-
-    private checkVolumeSpike(completedCandle: Candle, previousCandle: Candle): void {
-        if (!completedCandle.confirmed) {
-            return;
-        }
-
-        const volumeRatio = completedCandle.volume / previousCandle.volume;
-        const VOLUME_THRESHOLD = 2000; // Пороговое значение объема
-        
-        // Если есть активная позиция и обнаружен аномальный объем - закрываем
-        if (volumeRatio >= this.volumeMultiplier && this.activePosition) {
-            const timeSinceEntry = completedCandle.timestamp - this.activePosition.entryTime;
-            // Проверяем, что это не та же свеча, на которой мы вошли
-            if (timeSinceEntry > 0) {
-                logger.info(`🚨 ОБНАРУЖЕН АНОМАЛЬНЫЙ ОБЪЕМ ПОСЛЕ ВХОДА В ПОЗИЦИЮ!`);
-                logger.info(`📊 Объем вырос в ${volumeRatio.toFixed(2)}x раз`);
-                this.closePosition(completedCandle, 'Аномальный объем после входа');
-                return;
-            }
-        }
-
-        // Проверяем на новый сигнал ТОЛЬКО если нет активного сигнала
-        const isVolumeSpike = volumeRatio >= this.volumeMultiplier;
-        const isHighVolume = completedCandle.volume >= VOLUME_THRESHOLD;
-
-        if (!this.currentSignal?.isActive && (isVolumeSpike || isHighVolume)) {
-            // Если объем этой свечи больше предыдущей в N раз ИЛИ больше 2000
-            logger.info(`🚨 ОБНАРУЖЕН ${isHighVolume ? 'ВЫСОКИЙ ОБЪЕМ' : 'ВСПЛЕСК ОБЪЕМА'} В ЗАКРЫТОЙ СВЕЧЕ!`);
-            if (isVolumeSpike) {
-                logger.info(`📊 Объем вырос в ${volumeRatio.toFixed(2)}x раз`);
-            }
-            if (isHighVolume) {
-                logger.info(`📊 Объем превысил порог ${VOLUME_THRESHOLD}: ${completedCandle.volume.toFixed(2)}`);
-            }
-            logger.info(`💰 Цена закрытия: ${completedCandle.close}`);
-            logger.info(`📈 Движение цены: ${((completedCandle.close - completedCandle.open) / completedCandle.open * 100).toFixed(2)}%`);
-            
-            const message = this.formatVolumeAlert(completedCandle, previousCandle);
-            this.onVolumeSpike(message);
-
-            this.currentSignal = {
-                candle: completedCandle,
-                isActive: true,
-                waitingForLowerVolume: true
-            };
-            
-            logger.info(`✅ Сигнал активирован, ожидаем следующую свечу с меньшим объемом`);
-            logger.info('➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖');
-        } else if (this.currentSignal?.isActive && completedCandle.volume > previousCandle.volume) {
-            // Если есть активный сигнал и текущая свеча больше предыдущей - она становится новой сигнальной
-            logger.info(`🔄 ОБНОВЛЕНИЕ СИГНАЛА:`);
-            logger.info(`📊 Новый объем выше предыдущего`);
-            logger.info(`📊 Предыдущий объем: ${previousCandle.volume.toFixed(2)}`);
-            logger.info(`📊 Новый объем: ${completedCandle.volume.toFixed(2)}`);
-            
-            this.currentSignal = {
-                candle: completedCandle,
-                isActive: true,
-                waitingForLowerVolume: true
-            };
-            
-            logger.info(`✅ Сигнал обновлен, ожидаем следующую свечу с меньшим объемом`);
-            logger.info('➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖');
-        } else if (volumeRatio >= this.volumeMultiplier * 0.8 || completedCandle.volume >= VOLUME_THRESHOLD * 0.8) {
-            // Просто логируем для информации
-            logger.info(`🔍 ПРОВЕРКА ОБЪЕМОВ ЗАКРЫТОЙ СВЕЧИ:`);
-            logger.info(`📊 Объем закрытой свечи: ${completedCandle.volume.toFixed(2)}`);
-            logger.info(`📊 Объем предыдущей свечи: ${previousCandle.volume.toFixed(2)}`);
-            if (volumeRatio >= this.volumeMultiplier * 0.8) {
-                logger.info(`📈 Соотношение: ${volumeRatio.toFixed(2)}x (цель: ${this.volumeMultiplier}x)`);
-            }
-            if (completedCandle.volume >= VOLUME_THRESHOLD * 0.8) {
-                logger.info(`📈 Приближение к пороговому объему: ${completedCandle.volume.toFixed(2)} (цель: ${VOLUME_THRESHOLD})`);
-            }
-            logger.info(`⏱️ Время свечи: ${new Date(completedCandle.timestamp).toLocaleTimeString()}`);
-            logger.info(`📊 Цена закрытия: ${completedCandle.close}`);
-            logger.info('➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖');
-        }
-    }
-
-    private formatVolumeAlert(currentCandle: Candle, previousCandle: Candle): string {
-        return `🔍 ОБНАРУЖЕНО АНОМАЛЬНОЕ УВЕЛИЧЕНИЕ ОБЪЕМА ${this.SYMBOL}:\n\n` +
-               `📊 Текущий объем: ${currentCandle.volume.toFixed(2)}\n` +
-               `📈 Предыдущий объем: ${previousCandle.volume.toFixed(2)}\n` +
-               `💹 Увеличение: ${((currentCandle.volume - previousCandle.volume) / previousCandle.volume * 100).toFixed(2)}%\n` +
-               `${currentCandle.isGreen ? '🟢' : '🔴'} Цвет свечи: ${currentCandle.isGreen ? 'ЗЕЛЕНЫЙ' : 'КРАСНЫЙ'}\n` +
-               `📉 Движение цены: ${((currentCandle.close - currentCandle.open) / currentCandle.open * 100).toFixed(2)}%\n` +
-               `💰 Текущая цена: ${currentCandle.close}`;
-    }
-
-    public onVolumeSpike: (message: string) => void = () => {};
-    public onTradeOpen: (message: string) => void = () => {};
-
-    public async subscribeToSymbol(): Promise<void> {
-        try {
-            await this.initializeCandleHistory();
-            await this.wsClient.subscribeV5([`kline.${CANDLE_INTERVAL}.${this.SYMBOL}`], CATEGORY as 'linear');
-            
-            const startMessage = `🤖 БОТ ЗАПУЩЕН\n\n` +
-                               `📊 Торговая пара: ${this.SYMBOL}\n` +
-                               `💰 Размер позиции: $${this.TRADE_SIZE_USD}\n` +
-                               `📈 Множитель объема: ${this.volumeMultiplier}x\n` +
-                               `⏱️ Таймфрейм: ${CANDLE_INTERVAL}m\n` +
-                               `📥 Загружено свечей: ${this.candleHistory.length}`;
-            this.onTradeOpen(startMessage);
-            logger.info(`✅ Подписка на ${this.SYMBOL} активирована`);
-        } catch (error) {
-            logger.error(`❌ Ошибка при инициализации бота:`, error);
-            throw error;
-        }
-    }
-
-    private startTrailingStopCheck(): void {
-        // Останавливаем предыдущий интервал, если он существует
-        this.stopTrailingStopCheck();
-
-        // Запускаем новый интервал
-        this.trailingStopInterval = setInterval(async () => {
-            if (!this.activePosition) {
-                this.stopTrailingStopCheck();
-                return;
-            }
-
-            try {
-                // Получаем текущую цену
-                const response = await this.client.getTickers({
-                    category: 'linear',
-                    symbol: this.SYMBOL
-                });
-
-                if (response.retCode === 0 && response.result.list && response.result.list[0]) {
-                    const currentPrice = Number(response.result.list[0].lastPrice);
-                    const entryPrice = this.activePosition.entryPrice;
-                    const side = this.activePosition.side;
-
-                    // Вычисляем текущую прибыль в пунктах
-                    const profitPoints = side === 'Buy' ? 
-                        currentPrice - entryPrice : 
-                        entryPrice - currentPrice;
-
-                    // Если прибыль достигла уровня активации трейлинга
-                    if (profitPoints >= this.TRAILING_ACTIVATION_POINTS) {
-                        // Вычисляем новый уровень стопа
-                        const newStopPrice = side === 'Buy' ? 
-                            currentPrice - this.TRAILING_DISTANCE : 
-                            currentPrice + this.TRAILING_DISTANCE;
-
-                        // Проверяем, нужно ли обновлять стоп
-                        if (!this.activePosition.isTrailingActive || 
-                            (side === 'Buy' && newStopPrice > (this.activePosition.lastTrailingStopPrice || 0)) ||
-                            (side === 'Sell' && newStopPrice < (this.activePosition.lastTrailingStopPrice || Infinity))) {
-                            
-                            // Если трейлинг активируется впервые, отменяем тейк-профит
-                            if (!this.activePosition.isTrailingActive) {
-                                logger.info(`🎯 Активация трейлинг-стопа! Отменяем тейк-профит`);
-                                await this.client.setTradingStop({
-                                    category: 'linear',
-                                    symbol: this.SYMBOL,
-                                    takeProfit: '0',
-                                    stopLoss: newStopPrice.toString(),
-                                    positionIdx: 0,
-                                    tpTriggerBy: 'MarkPrice',
-                                    slTriggerBy: 'MarkPrice'
-                                });
-                                this.activePosition.isTrailingActive = true;
-                            } else {
-                                // Обновляем только стоп-лосс
-                                await this.client.setTradingStop({
-                                    category: 'linear',
-                                    symbol: this.SYMBOL,
-                                    stopLoss: newStopPrice.toString(),
-                                    positionIdx: 0,
-                                    slTriggerBy: 'MarkPrice'
-                                });
-                            }
-
-                            this.activePosition.lastTrailingStopPrice = newStopPrice;
-                            logger.info(`📈 Трейлинг-стоп передвинут: ${newStopPrice.toFixed(1)} (${this.TRAILING_DISTANCE} пунктов от цены ${currentPrice})`);
-                        }
-                    }
-                }
-            } catch (error) {
-                logger.error('❌ Ошибка при обновлении трейлинг-стопа:', error);
-            }
-        }, 3000);
-    }
-
-    private stopTrailingStopCheck(): void {
-        if (this.trailingStopInterval) {
-            clearInterval(this.trailingStopInterval);
-            this.trailingStopInterval = null;
-        }
-    }
+  }
 }
