@@ -32,9 +32,11 @@ export class TradingLogicService {
   private isOpeningPosition: boolean = false;
   private lastSignalNotificationTime: number = 0;
   private lastRestCheckTime: number = 0;
-  private readonly REST_CHECK_INTERVAL = 5 * 60 * 1000; // 5 минут
+  private readonly REST_CHECK_INTERVAL = 15 * 60 * 1000; // 15 минут для часового таймфрейма
+  private readonly POSITION_CHECK_INTERVAL = 60 * 1000; // 1 минута
   private hasInitialSync = false;
   private lastPositionOpenTime: number = 0;
+  private positionCheckInterval: NodeJS.Timeout | null = null;
 
   private readonly TAKE_PROFIT_POINTS: number;
   private readonly STOP_LOSS_POINTS: number;
@@ -55,12 +57,15 @@ export class TradingLogicService {
   ) {
     this.SYMBOL = options.symbol;
     this.TRADE_SIZE_USD = options.tradeSizeUsd;
-    this.TAKE_PROFIT_POINTS = options.takeProfitPoints;
-    this.STOP_LOSS_POINTS = options.stopLossPoints;
-    this.TRAILING_ACTIVATION_POINTS = options.trailingActivationPoints;
-    this.TRAILING_DISTANCE = options.trailingDistance;
-    this.VOLUME_THRESHOLD = options.volumeThreshold;
+    this.TAKE_PROFIT_POINTS = options.takeProfitPoints; // 2 пункта для часового таймфрейма
+    this.STOP_LOSS_POINTS = options.stopLossPoints; // 1.5 пункта для часового таймфрейма
+    this.TRAILING_ACTIVATION_POINTS = options.trailingActivationPoints; // Активация трейлинга при 1.5 пункте
+    this.TRAILING_DISTANCE = options.trailingDistance; // Дистанция трейлинга 1.0 пункт
+    this.VOLUME_THRESHOLD = options.volumeThreshold; // Порог объема для часового таймфрейма
     this.USE_TRAILING_STOP = options.useTrailingStop;
+
+    // Запускаем периодическую проверку позиции
+    this.startPositionCheck();
   }
 
   public getActivePosition(): ActivePosition | null {
@@ -98,206 +103,238 @@ export class TradingLogicService {
       // Сохраняем историю свечей
       this.candleHistory = [...candleHistory];
 
-      // Проверяем только при запуске бота
-      if (!this.hasInitialSync) {
-        const positionsResponse = await this.client.getPositionInfo({
-          category: "linear",
-          symbol: this.SYMBOL
-        });
+      // Проверяем состояние позиции при каждом вызове
+      const positionsResponse = await this.client.getPositionInfo({
+        category: "linear",
+        symbol: this.SYMBOL
+      });
 
-        if (positionsResponse.retCode === 0 && positionsResponse.result?.list) {
-          const openPositions = positionsResponse.result.list.filter(
-            pos => Number(pos.size) > 0
-          );
+      if (positionsResponse.retCode === 0 && positionsResponse.result?.list) {
+        const openPositions = positionsResponse.result.list.filter(
+          pos => Number(pos.size) > 0
+        );
 
-          if (openPositions.length > 0) {
-            const position = openPositions[0];
-            // Проверяем, не является ли это нашей только что открытой позицией
-            if (
-              Date.now() - this.lastPositionOpenTime < 5000 &&
-              this.activePosition &&
-              this.activePosition.side === position.side &&
-              Math.abs(
-                Number(position.avgPrice) - this.activePosition.entryPrice
-              ) < 0.1
-            ) {
-              logger.info(
-                "⚠️ Пропускаем усыновление - это наша недавно открытая позиция"
-              );
-              return;
+        // Если нет открытых позиций, но у нас есть активная позиция в состоянии
+        if (openPositions.length === 0 && this.activePosition) {
+          logger.info("🔄 Позиция закрыта, сбрасываем состояние");
+          this.activePosition = null;
+          this.stopTrailingStopCheck();
+          this.stopPositionCheck();
+          return;
+        }
+
+        // Если есть открытая позиция
+        if (openPositions.length > 0) {
+          const position = openPositions[0];
+          // Проверяем, не является ли это нашей только что открытой позицией
+          if (
+            Date.now() - this.lastPositionOpenTime < 5000 &&
+            this.activePosition &&
+            this.activePosition.side === position.side &&
+            Math.abs(
+              Number(position.avgPrice) - this.activePosition.entryPrice
+            ) < 0.1
+          ) {
+            logger.info(
+              "⚠️ Пропускаем усыновление - это наша недавно открытая позиция"
+            );
+            return;
+          }
+          const positionSize = position.size;
+          const currentPrice = Number(position.markPrice);
+          const side = position.side;
+          const entryPrice = Number(position.avgPrice);
+
+          logger.info(`🔄 УСЫНОВЛЕНИЕ СУЩЕСТВУЮЩЕЙ ПОЗИЦИИ:`);
+          logger.info(`    Размер: ${positionSize} ${position.symbol}`);
+          logger.info(`   📈 Сторона: ${side}`);
+          logger.info(`   💰 Средняя цена входа: ${entryPrice}`);
+          logger.info(`   💹 Текущая P&L: ${position.unrealisedPnl} USDT`);
+
+          // Получаем текущие TP/SL
+          let currentTakeProfit: number | undefined;
+          let currentStopLoss: number | undefined;
+          let isTrailingActive = false;
+
+          // Проверяем профит для активации трейлинга
+          const profitPoints =
+            side === "Buy"
+              ? currentPrice - entryPrice
+              : entryPrice - currentPrice;
+
+          // Ищем последний сигнал для установки стоп-лосса
+          let stopLossLevel = 0;
+          let foundSignal = false;
+
+          // Берем последние две свечи из истории
+          if (this.candleHistory.length >= 2) {
+            const lastCandle = this.candleHistory[
+              this.candleHistory.length - 1
+            ];
+            const prevCandle = this.candleHistory[
+              this.candleHistory.length - 2
+            ];
+
+            // Проверяем объем для определения сигнальной свечи
+            if (prevCandle.volume > this.VOLUME_THRESHOLD) {
+              foundSignal = true;
+              stopLossLevel =
+                side === "Buy"
+                  ? Math.min(prevCandle.low, lastCandle.low)
+                  : Math.max(prevCandle.high, lastCandle.high);
             }
-            const positionSize = position.size;
-            const currentPrice = Number(position.markPrice);
-            const side = position.side;
-            const entryPrice = Number(position.avgPrice);
+          }
 
-            logger.info(`🔄 УСЫНОВЛЕНИЕ СУЩЕСТВУЮЩЕЙ ПОЗИЦИИ:`);
-            logger.info(`    Размер: ${positionSize} ${position.symbol}`);
-            logger.info(`   📈 Сторона: ${side}`);
-            logger.info(`   💰 Средняя цена входа: ${entryPrice}`);
-            logger.info(`   💹 Текущая P&L: ${position.unrealisedPnl} USDT`);
+          // Устанавливаем стоп-лосс
+          const stopLoss =
+            side === "Buy"
+              ? foundSignal
+                ? stopLossLevel - this.STOP_LOSS_POINTS
+                : currentPrice - this.STOP_LOSS_POINTS
+              : foundSignal
+              ? stopLossLevel + this.STOP_LOSS_POINTS
+              : currentPrice + this.STOP_LOSS_POINTS;
 
-            // Получаем текущие TP/SL
-            let currentTakeProfit: number | undefined;
-            let currentStopLoss: number | undefined;
-            let isTrailingActive = false;
+          // Рассчитываем тейк-профит от текущей цены
+          const takeProfit =
+            currentPrice +
+            (side === "Buy"
+              ? this.TAKE_PROFIT_POINTS
+              : -this.TAKE_PROFIT_POINTS);
 
-            // Проверяем профит для активации трейлинга
-            const profitPoints =
-              side === "Buy"
-                ? currentPrice - entryPrice
-                : entryPrice - currentPrice;
+          // Отменяем все существующие ордера
+          try {
+            const activeOrders = await this.client.getActiveOrders({
+              category: "linear",
+              symbol: this.SYMBOL
+            });
 
-            // Ищем последний сигнал для установки стоп-лосса
-            let stopLossLevel = currentPrice;
-            let foundSignal = false;
-
-            // Берем последние две свечи из истории
-            if (this.candleHistory.length >= 2) {
-              const lastCandle = this.candleHistory[
-                this.candleHistory.length - 1
-              ];
-              const prevCandle = this.candleHistory[
-                this.candleHistory.length - 2
-              ];
-
-              // Проверяем объем для определения сигнальной свечи
-              if (prevCandle.volume > this.VOLUME_THRESHOLD) {
-                foundSignal = true;
-                stopLossLevel =
-                  side === "Buy"
-                    ? Math.min(prevCandle.low, lastCandle.low)
-                    : Math.max(prevCandle.high, lastCandle.high);
-              }
-            }
-
-            // Устанавливаем стоп-лосс
-            const stopLoss =
-              side === "Buy"
-                ? foundSignal
-                  ? stopLossLevel - this.STOP_LOSS_POINTS
-                  : currentPrice - this.STOP_LOSS_POINTS
-                : foundSignal
-                ? stopLossLevel + this.STOP_LOSS_POINTS
-                : currentPrice + this.STOP_LOSS_POINTS;
-
-            // Рассчитываем тейк-профит от текущей цены
-            const takeProfit =
-              currentPrice +
-              (side === "Buy"
-                ? this.TAKE_PROFIT_POINTS
-                : -this.TAKE_PROFIT_POINTS);
-
-            // Отменяем все существующие ордера
-            try {
-              const activeOrders = await this.client.getActiveOrders({
-                category: "linear",
-                symbol: this.SYMBOL
-              });
-
-              if (activeOrders.retCode === 0 && activeOrders.result?.list) {
-                for (const order of activeOrders.result.list) {
-                  if (order.reduceOnly) {
-                    await this.client.cancelOrder({
-                      category: "linear",
-                      symbol: this.SYMBOL,
-                      orderId: order.orderId
-                    });
-                    logger.info(
-                      `✅ Отменен существующий ордер: ${order.orderId}`
-                    );
-                  }
+            if (activeOrders.retCode === 0 && activeOrders.result?.list) {
+              for (const order of activeOrders.result.list) {
+                if (order.reduceOnly) {
+                  await this.client.cancelOrder({
+                    category: "linear",
+                    symbol: this.SYMBOL,
+                    orderId: order.orderId
+                  });
+                  logger.info(
+                    `✅ Отменен существующий ордер: ${order.orderId}`
+                  );
                 }
               }
-            } catch (error) {
-              logger.error("❌ Ошибка при отмене существующих ордеров:", error);
             }
+          } catch (error) {
+            logger.error("❌ Ошибка при отмене существующих ордеров:", error);
+          }
 
-            // Устанавливаем новый TP
-            const tpResponse = await this.client.submitOrder({
-              category: "linear",
-              symbol: this.SYMBOL,
-              side: side === "Buy" ? "Sell" : "Buy",
-              orderType: "Limit",
-              qty: positionSize.toString(),
-              price: takeProfit.toString(),
-              triggerPrice: takeProfit.toString(),
-              triggerDirection: side === "Buy" ? 1 : 2,
-              timeInForce: "GTC",
-              triggerBy: "MarkPrice",
-              reduceOnly: true,
-              orderLinkId: `tp_${Date.now()}`
-            });
+          // Устанавливаем TP/SL
+          logger.info("\n🎯 УСТАНАВЛИВАЕМ TP/SL:");
+          const tpResponse = await this.client.setTradingStop({
+            category: "linear",
+            symbol: this.SYMBOL,
+            takeProfit: takeProfit.toString(),
+            stopLoss: stopLoss.toString(),
+            positionIdx: 0
+          });
 
-            // Устанавливаем новый SL
-            const slResponse = await this.client.submitOrder({
-              category: "linear",
-              symbol: this.SYMBOL,
-              side: side === "Buy" ? "Sell" : "Buy",
-              orderType: "Limit",
-              qty: positionSize.toString(),
-              price: stopLoss.toString(),
-              triggerPrice: stopLoss.toString(),
-              triggerDirection: side === "Buy" ? 2 : 1,
-              timeInForce: "GTC",
-              triggerBy: "MarkPrice",
-              reduceOnly: true,
-              orderLinkId: `sl_${Date.now()}`
-            });
+          if (tpResponse.retCode === 0) {
+            logger.info(
+              `✅ Установлены уровни TP=${takeProfit.toFixed(
+                2
+              )}, SL=${stopLoss.toFixed(2)}`
+            );
+          } else {
+            logger.error(`❌ Ошибка при установке TP/SL: ${tpResponse.retMsg}`);
+          }
 
-            if (tpResponse.retCode === 0 && slResponse.retCode === 0) {
+          // Проверяем условия для активации трейлинга
+          isTrailingActive =
+            this.USE_TRAILING_STOP &&
+            profitPoints >= this.TRAILING_ACTIVATION_POINTS;
+
+          this.activePosition = {
+            side: side as any,
+            entryPrice: entryPrice,
+            entryTime: Date.now(),
+            isTrailingActive: isTrailingActive,
+            lastTrailingStopPrice: stopLoss,
+            orderId: "",
+            plannedTakeProfit: takeProfit,
+            plannedStopLoss: stopLoss,
+            executionNotificationSent: true
+          };
+
+          // Сохраняем время открытия позиции
+          this.lastPositionOpenTime = Date.now();
+
+          // Отправляем уведомление об усыновлении
+          const adoptMessage = this.formatPositionAdoptedAlert(position);
+          await this.callbacks.onTradeOperation(adoptMessage);
+
+          // Запускаем трейлинг-стоп для существующей позиции только если он должен быть активен
+          if (isTrailingActive) {
+            logger.info(
+              `🚀 Трейлинг-стоп активирован при усыновлении (профит: ${profitPoints.toFixed(
+                2
+              )} пунктов)`
+            );
+            this.startTrailingStopCheck();
+          } else {
+            logger.info(
+              `ℹ️ Трейлинг-стоп не активирован (профит: ${profitPoints.toFixed(
+                2
+              )} пунктов, требуется: ${this.TRAILING_ACTIVATION_POINTS})`
+            );
+          }
+
+          // Проверяем, есть ли уже TP/SL
+          const positionInfo = await this.client.getPositionInfo({
+            category: "linear",
+            symbol: this.SYMBOL
+          });
+
+          if (
+            positionInfo.retCode === 0 &&
+            positionInfo.result.list.length > 0
+          ) {
+            const pos = positionInfo.result.list[0];
+            if (!pos.takeProfit && !pos.stopLoss) {
+              // Рассчитываем уровни TP/SL для усыновленной позиции
+              const entryPrice = parseFloat(pos.avgPrice);
+              const side = pos.side;
+
+              const takeProfit =
+                entryPrice +
+                (side === "Buy"
+                  ? this.TAKE_PROFIT_POINTS
+                  : -this.TAKE_PROFIT_POINTS);
+
+              // Для усыновленной позиции используем текущую цену как экстремум
+              const currentPrice = parseFloat(pos.markPrice);
+              const stopLoss =
+                side === "Buy"
+                  ? currentPrice - this.STOP_LOSS_POINTS
+                  : currentPrice + this.STOP_LOSS_POINTS;
+
+              // Устанавливаем TP/SL
+              await this.client.setTradingStop({
+                category: "linear",
+                symbol: this.SYMBOL,
+                takeProfit: takeProfit.toString(),
+                stopLoss: stopLoss.toString(),
+                positionIdx: 0
+              });
+
               logger.info(
-                `✅ Установлены новые уровни TP=${takeProfit.toFixed(
+                `✅ Установлены уровни для усыновленной позиции: TP=${takeProfit.toFixed(
                   2
                 )}, SL=${stopLoss.toFixed(2)}`
               );
-            } else {
-              logger.error(
-                `❌ Ошибка при установке новых уровней: TP=${tpResponse.retMsg}, SL=${slResponse.retMsg}`
-              );
             }
-
-            // Проверяем условия для активации трейлинга
-            isTrailingActive =
-              this.USE_TRAILING_STOP &&
-              profitPoints >= this.TRAILING_ACTIVATION_POINTS;
-
-            this.activePosition = {
-              side: side as any,
-              entryPrice: entryPrice,
-              entryTime: Date.now(),
-              isTrailingActive: isTrailingActive,
-              lastTrailingStopPrice: stopLoss,
-              orderId: "",
-              plannedTakeProfit: takeProfit,
-              plannedStopLoss: stopLoss,
-              executionNotificationSent: true
-            };
-
-            // Отправляем уведомление об усыновлении
-            const adoptMessage = this.formatPositionAdoptedAlert(position);
-            await this.callbacks.onTradeOperation(adoptMessage);
-
-            // Запускаем трейлинг-стоп для существующей позиции только если он должен быть активен
-            if (isTrailingActive) {
-              logger.info(
-                `🚀 Трейлинг-стоп активирован при усыновлении (профит: ${profitPoints.toFixed(
-                  2
-                )} пунктов)`
-              );
-              this.startTrailingStopCheck();
-            } else {
-              logger.info(
-                `ℹ️ Трейлинг-стоп не активирован (профит: ${profitPoints.toFixed(
-                  2
-                )} пунктов, требуется: ${this.TRAILING_ACTIVATION_POINTS})`
-              );
-            }
-          } else {
-            logger.info("✅ Открытых позиций не найдено, состояние чистое");
           }
+        } else {
+          logger.info("✅ Открытых позиций не найдено, состояние чистое");
         }
-        this.hasInitialSync = true;
       }
     } catch (error) {
       logger.error("❌ Ошибка при синхронизации состояния позиций:", error);
@@ -460,165 +497,77 @@ export class TradingLogicService {
     completedCandle: Candle,
     candleHistory: Candle[]
   ): Promise<void> {
-    // Проверяем наличие активной позиции
-    if (this.activePosition) {
+    // Проверяем, что свеча действительно закрыта
+    if (!completedCandle.confirmed) {
       logger.info(
-        `🔄 ПРОПУСК ОБРАБОТКИ СВЕЧИ: Есть активная ${this.activePosition.side} позиция`
+        `⏳ Пропуск обработки незакрытой свечи: ${new Date(
+          completedCandle.timestamp
+        ).toLocaleTimeString()}`
       );
       return;
     }
 
-    // Проверяем наличие открытых позиций через API
-    try {
-      const positionsResponse = await this.client.getPositionInfo({
-        category: "linear",
-        symbol: this.SYMBOL
-      });
-
-      if (positionsResponse.retCode === 0 && positionsResponse.result?.list) {
-        const openPositions = positionsResponse.result.list.filter(
-          pos => Number(pos.size) > 0
-        );
-
-        if (openPositions.length > 0) {
-          logger.info(
-            `🔄 ПРОПУСК ОБРАБОТКИ СВЕЧИ: Обнаружена открытая позиция через API`
-          );
-          return;
-        }
-      }
-    } catch (error) {
-      logger.error("❌ Ошибка при проверке открытых позиций:", error);
+    // Проверяем, есть ли активный сигнал
+    const currentSignal = this.getCurrentSignal();
+    if (!currentSignal?.isActive) {
       return;
     }
 
-    if (!this.currentSignal?.isActive) {
-      logger.info(`⏳ ПРОПУСК ОБРАБОТКИ: Нет активного сигнала`);
-      return;
-    }
-
-    // НОВОЕ ЛОГИРОВАНИЕ - Подробная диагностика
     logger.info(`\n🔍 ДИАГНОСТИКА ОБРАБОТКИ СВЕЧИ:`);
     logger.info(
-      `   ⏰ Время обрабатываемой свечи: ${new Date(
+      `    ⏰ Время обрабатываемой свечи: ${new Date(
         completedCandle.timestamp
       ).toLocaleTimeString()}`
     );
     logger.info(
-      `   ⏰ Время сигнальной свечи: ${new Date(
-        this.currentSignal.candle.timestamp
+      `    ⏰ Время сигнальной свечи: ${new Date(
+        currentSignal.candle.timestamp
       ).toLocaleTimeString()}`
     );
-    logger.info(`   📊 Сигнал активен: ${this.currentSignal.isActive}`);
+    logger.info(`    📊 Сигнал активен: ${currentSignal.isActive}`);
     logger.info(
-      `   📊 Ожидание меньшего объема: ${this.currentSignal.waitingForLowerVolume}`
+      `    📊 Ожидание меньшего объема: ${currentSignal.waitingForLowerVolume}`
     );
-    logger.info(`   📊 Объем текущей свечи: ${completedCandle.volume}`);
+    logger.info(`    📊 Объем текущей свечи: ${completedCandle.volume}`);
     logger.info(
-      `   📊 Объем сигнальной свечи: ${this.currentSignal.candle.volume}`
+      `    📊 Объем сигнальной свечи: ${currentSignal.candle.volume}`
     );
 
-    // Проверяем, что текущая свеча новее сигнальной
-    if (completedCandle.timestamp <= this.currentSignal.candle.timestamp) {
+    // Проверяем, что текущая свеча действительно закрыта
+    const now = Date.now();
+    const candleEndTime = completedCandle.timestamp + 60 * 60 * 1000; // Добавляем 1 час
+    if (now < candleEndTime) {
       logger.info(
-        `⚠️ ПРОПУСК ОБРАБОТКИ: Текущая свеча (${new Date(
+        `⏳ Пропуск обработки незакрытой свечи: ${new Date(
           completedCandle.timestamp
-        ).toLocaleTimeString()}) старше или равна сигнальной (${new Date(
-          this.currentSignal.candle.timestamp
-        ).toLocaleTimeString()})`
+        ).toLocaleTimeString()} (еще не закрыта)`
       );
       return;
     }
 
-    // Проверяем что свеча подтверждена
-    if (!completedCandle.confirmed) {
-      logger.info(`⏳ Ждем подтверждения текущей свечи`);
-      return;
-    }
+    // Если мы ждем свечу с меньшим объемом
+    if (currentSignal.waitingForLowerVolume) {
+      logger.info(`\n📊 ПРОВЕРКА ПОДТВЕРЖДАЮЩЕЙ СВЕЧИ:`);
+      logger.info(`    📈 Объем текущей: ${completedCandle.volume.toFixed(2)}`);
+      logger.info(`    📊 Объем сигнальной: ${currentSignal.candle.volume}`);
 
-    logger.info(`📊 ПРОВЕРКА ПОДТВЕРЖДАЮЩЕЙ СВЕЧИ:`);
-    logger.info(`   📈 Объем текущей: ${completedCandle.volume.toFixed(2)}`);
-    logger.info(
-      `   📊 Объем сигнальной: ${this.currentSignal.candle.volume.toFixed(2)}`
-    );
-
-    // Если объем текущей свечи больше сигнальной - обновляем сигнал
-    if (completedCandle.volume > this.currentSignal.candle.volume) {
-      // Проверяем, не был ли сигнал уже подтвержден
-      if (this.currentSignal.waitingForLowerVolume) {
-        logger.info(`🔄 ОБНОВЛЕНИЕ СИГНАЛА: Найдена свеча с большим объемом`);
+      // Проверяем, что объем текущей свечи меньше объема сигнальной
+      if (completedCandle.volume < currentSignal.candle.volume) {
+        logger.info(`✅ ПОДТВЕРЖДЕНИЕ: Найдена свеча с меньшим объемом`);
+        logger.info(`🎯 ВХОДИМ В ПОЗИЦИЮ СРАЗУ ПОСЛЕ ПОДТВЕРЖДАЮЩЕЙ СВЕЧИ`);
         logger.info(
-          `   📊 Старый объем: ${this.currentSignal.candle.volume.toFixed(2)}`
+          `    📊 Сигнальная свеча: ${currentSignal.candle.volume}, ${
+            currentSignal.candle.close > currentSignal.candle.open ? "🟢" : "🔴"
+          }`
         );
-        logger.info(`   📊 Новый объем: ${completedCandle.volume.toFixed(2)}`);
-
-        this.currentSignal = {
-          candle: completedCandle,
-          isActive: true,
-          waitingForLowerVolume: true
-        };
-        this.usedSignalTimestamps.add(completedCandle.timestamp);
-      } else {
         logger.info(
-          `⏳ ПРОПУСК ОБНОВЛЕНИЯ: Сигнал уже подтвержден и готов к входу`
+          `    📊 Текущая свеча: ${new Date(
+            completedCandle.timestamp
+          ).toLocaleTimeString()}`
         );
-      }
-    }
-    // Если объем текущей свечи меньше сигнальной - входим в позицию
-    else if (completedCandle.volume <= this.currentSignal.candle.volume) {
-      logger.info(`✅ ПОДТВЕРЖДЕНИЕ: Найдена свеча с меньшим объемом`);
-      logger.info(`🎯 ВХОДИМ В ПОЗИЦИЮ СРАЗУ ПОСЛЕ ПОДТВЕРЖДАЮЩЕЙ СВЕЧИ`);
-      logger.info(
-        `   📊 Сигнальная свеча: ${new Date(
-          this.currentSignal.candle.timestamp
-        ).toLocaleTimeString()}, ${
-          this.currentSignal.candle.isGreen ? "🟢" : "🔴"
-        }`
-      );
-      logger.info(
-        `   📊 Текущая свеча: ${new Date(
-          completedCandle.timestamp
-        ).toLocaleTimeString()}`
-      );
 
-      // НОВОЕ ЛОГИРОВАНИЕ - Перед попыткой входа
-      logger.info(`\n🚀 ПОПЫТКА ВХОДА В ПОЗИЦИЮ:`);
-      logger.info(`   📊 Состояние сигнала перед входом:`);
-      logger.info(`   - isActive: ${this.currentSignal.isActive}`);
-      logger.info(
-        `   - waitingForLowerVolume: ${this.currentSignal.waitingForLowerVolume}`
-      );
-      logger.info(
-        `   - Направление: ${
-          this.currentSignal.candle.isGreen ? "ШОРТ" : "ЛОНГ"
-        }`
-      );
-
-      // Отмечаем, что сигнал подтвержден и больше не ждем свечу с меньшим объемом
-      this.currentSignal.waitingForLowerVolume = false;
-
-      // НОВОЕ ЛОГИРОВАНИЕ - Вызов openPosition
-      logger.info(`   🎯 Вызываем openPosition...`);
-      const positionOpened = await this.openPosition(
-        this.currentSignal.candle,
-        completedCandle
-      );
-
-      // НОВОЕ ЛОГИРОВАНИЕ - Результат открытия позиции
-      logger.info(
-        `   📊 Результат открытия позиции: ${
-          positionOpened ? "✅ УСПЕШНО" : "❌ НЕУДАЧА"
-        }`
-      );
-
-      // Деактивируем сигнал ТОЛЬКО если позиция успешно открыта
-      if (positionOpened && this.currentSignal) {
-        this.currentSignal.isActive = false;
-        logger.info("✅ Сигнал деактивирован после успешного входа в позицию.");
-      } else {
-        logger.info(
-          "⚠️ Сигнал остается активным, т.к. не удалось открыть позицию."
-        );
+        // Входим в позицию
+        await this.openPosition(currentSignal.candle, completedCandle);
       }
     }
   }
@@ -647,211 +596,76 @@ export class TradingLogicService {
     logger.info("🔒 Блокируем множественные попытки открытия позиции");
 
     try {
-      // Проверяем баланс перед открытием позиции
-      logger.info("💰 Запрашиваем баланс USDT...");
-      const balanceResponse = await this.client.getWalletBalance({
-        accountType: "UNIFIED"
-      });
-
-      logger.info(`📊 Ответ баланса: ${JSON.stringify(balanceResponse)}`);
-
-      if (balanceResponse.retCode !== 0) {
-        logger.error(`❌ Ошибка получения баланса: ${balanceResponse.retMsg}`);
-        this.isOpeningPosition = false;
-        return false;
-      }
-
-      if (!balanceResponse.result?.list?.[0]?.coin) {
-        logger.error("❌ Некорректный формат ответа баланса");
-        logger.info(
-          `📊 Полный ответ баланса: ${JSON.stringify(balanceResponse, null, 2)}`
-        );
-        this.isOpeningPosition = false;
-        return false;
-      }
-
-      const usdtBalance = balanceResponse.result.list[0].coin.find(
-        c => c.coin === "USDT"
-      );
-
-      if (!usdtBalance) {
-        logger.error("❌ Баланс USDT не найден в ответе");
-        logger.info(
-          `📊 Доступные монеты: ${balanceResponse.result.list[0].coin
-            .map(c => `${c.coin}: ${c.equity} (${c.walletBalance})`)
-            .join(", ")}`
-        );
-        this.isOpeningPosition = false;
-        return false;
-      }
-
-      const availableBalance = Number(usdtBalance.equity);
-      logger.info(
-        `💰 Баланс USDT: Доступно=${availableBalance.toFixed(
-          2
-        )}, Всего=${Number(usdtBalance.walletBalance).toFixed(2)}`
-      );
-
-      // Получаем информацию о плече для расчета необходимой маржи
-      logger.info("🔧 Запрашиваем информацию о плече...");
-      const instrumentResponse = await this.client.getInstrumentsInfo({
-        category: "linear",
-        symbol: this.SYMBOL
-      });
-
-      let requiredMargin = this.TRADE_SIZE_USD;
-      if (
-        instrumentResponse.retCode === 0 &&
-        instrumentResponse.result?.list?.[0]
-      ) {
-        const leverage =
-          Number(
-            instrumentResponse.result.list[0].leverageFilter?.maxLeverage
-          ) || 1;
-        requiredMargin =
-          this.TRADE_SIZE_USD / Math.min(leverage, this.LEVERAGE);
-        logger.info(
-          `🔧 Доступное плечо: ${leverage}x, Используем: ${Math.min(
-            leverage,
-            this.LEVERAGE
-          )}x`
-        );
-      }
-
-      logger.info(
-        `💰 Доступный баланс USDT: ${availableBalance.toFixed(
-          2
-        )}, Требуется маржи: ${requiredMargin.toFixed(2)}`
-      );
-
-      if (availableBalance < requiredMargin) {
-        logger.error(
-          `❌ Недостаточно средств! Доступно: ${availableBalance.toFixed(
-            2
-          )} USDT, требуется: ${requiredMargin.toFixed(2)} USDT`
-        );
-        this.isOpeningPosition = false;
-        return false;
-      }
-
-      // КРИТИЧЕСКИ ВАЖНАЯ ДИАГНОСТИКА НАПРАВЛЕНИЯ СДЕЛКИ ДЛЯ VSA
-      logger.info(`\n🔍 АНАЛИЗ НАПРАВЛЕНИЯ СДЕЛКИ (VSA логика):`);
-      logger.info(
-        `   ⏰ Время сигнальной свечи: ${new Date(
-          signalCandle.timestamp
-        ).toLocaleTimeString()}`
-      );
-      logger.info(
-        `   ⏰ Время подтверждающей свечи: ${new Date(
-          currentCandle.timestamp
-        ).toLocaleTimeString()}`
-      );
-      logger.info(
-        `   📊 Сигнальная свеча: Open=${signalCandle.open} → Close=${
-          signalCandle.close
-        } (${signalCandle.isGreen ? "🟢" : "🔴"})`
-      );
-      logger.info(
-        `   📊 Подтверждающая свеча: Open=${currentCandle.open} → Close=${
-          currentCandle.close
-        } (${currentCandle.isGreen ? "🟢" : "🔴"})`
-      );
-
-      // Определяем направление на основе цвета сигнальной свечи
-      // Красная свеча = Buy (ЛОНГ), Зеленая свеча = Sell (ШОРТ)
-      const side: OrderSideV5 = signalCandle.isGreen ? "Sell" : "Buy";
-      logger.info(
-        `   🎯 ВЫБРАННОЕ НАПРАВЛЕНИЕ: ${side} (${
-          side === "Buy" ? "ЛОНГ" : "ШОРТ"
-        })`
-      );
-      logger.info(
-        `   📊 Причина: ${
-          signalCandle.isGreen ? "Зеленая" : "Красная"
-        } свеча = ${side === "Buy" ? "ЛОНГ" : "ШОРТ"}`
-      );
-
-      // Верификация VSA логики
-      const vsaLogicCheck = this.verifyVSALogic(signalCandle, side);
-      if (!vsaLogicCheck.isValid) {
-        logger.error(`🚫 ОШИБКА VSA ЛОГИКИ: ${vsaLogicCheck.error}`);
-        logger.error(`🚫 СДЕЛКА ОТМЕНЕНА ДЛЯ БЕЗОПАСНОСТИ!`);
-        this.isOpeningPosition = false;
-        return false;
-      }
-
-      // Получаем текущую рыночную цену
-      logger.info("💹 Запрашиваем текущую рыночную цену...");
+      // Получаем текущую рыночную цену через API
       const tickerResponse = await this.client.getTickers({
         category: "linear",
         symbol: this.SYMBOL
       });
 
-      let orderPrice = currentCandle.close;
-      let currentMarketPrice = currentCandle.close;
-
-      if (tickerResponse.retCode === 0 && tickerResponse.result?.list?.[0]) {
-        currentMarketPrice = Number(tickerResponse.result.list[0].lastPrice);
-        // Делаем небольшой отступ для быстрого исполнения
-        orderPrice =
-          side === "Buy"
-            ? currentMarketPrice + 0.01 // Buy выше рынка на 1 пункт
-            : currentMarketPrice - 0.01; // Sell ниже рынка на 1 пункт
-
-        logger.info(
-          `📊 Рыночная цена: ${currentMarketPrice}, Цена ордера: ${orderPrice}`
-        );
+      if (tickerResponse.retCode !== 0) {
+        logger.error(`❌ Ошибка получения цены: ${tickerResponse.retMsg}`);
+        this.isOpeningPosition = false;
+        return false;
       }
 
-      const stopLossLevel =
-        side === "Buy"
-          ? Math.min(signalCandle.low, currentCandle.low)
-          : Math.max(signalCandle.high, currentCandle.high);
-
-      const stopLoss =
-        side === "Buy"
-          ? stopLossLevel - this.STOP_LOSS_POINTS
-          : stopLossLevel + this.STOP_LOSS_POINTS;
-
-      // Рассчитываем тейк-профит от рыночной цены
-      const takeProfit =
-        currentMarketPrice +
-        (side === "Buy" ? this.TAKE_PROFIT_POINTS : -this.TAKE_PROFIT_POINTS);
-
-      logger.info(`\n📊 РАСЧЕТ УРОВНЕЙ:`);
-      logger.info(`   💰 Рыночная цена: ${currentMarketPrice}`);
-      logger.info(`   💰 Цена входа: ${orderPrice}`);
-      logger.info(
-        `   🎯 Take Profit: ${takeProfit.toFixed(2)} (${
-          side === "Buy" ? "+" : "-"
-        }${this.TAKE_PROFIT_POINTS} пунктов от рыночной цены)`
+      const currentMarketPrice = Number(
+        tickerResponse.result?.list?.[0]?.lastPrice
       );
+      if (!currentMarketPrice) {
+        logger.error("❌ Не удалось получить текущую цену");
+        this.isOpeningPosition = false;
+        return false;
+      }
+
+      logger.info(`   💰 Текущая цена: ${currentMarketPrice}`);
+
+      // Устанавливаем лимитный ордер
+      const side: OrderSideV5 = signalCandle.isGreen ? "Sell" : "Buy";
+      const limitPrice =
+        side === "Buy"
+          ? currentMarketPrice - 0.02 // Для покупки ставим ниже рынка
+          : currentMarketPrice + 0.02; // Для продажи ставим выше рынка
+
       logger.info(
-        `   🛡️ Stop Loss: ${stopLoss.toFixed(2)} (${
-          this.STOP_LOSS_POINTS
-        } пунктов от ${side === "Buy" ? "минимума" : "максимума"} свечей)`
+        `   📊 Лимитный ордер будет установлен по цене: ${limitPrice}`
       );
 
-      // Рассчитываем размер позиции с учетом минимального шага
-      const rawSize = this.TRADE_SIZE_USD / orderPrice;
+      // Рассчитываем размер позиции
+      const rawSize = this.TRADE_SIZE_USD / limitPrice;
       const qtyStep = 0.1; // Минимальный шаг для BTC
       const minQty = 0.1; // Минимальный размер для BTC
       const steps = Math.floor(rawSize / qtyStep);
       const contractSize = Math.max(steps * qtyStep, minQty).toFixed(1);
 
+      // Проверяем, что размер позиции корректный
+      if (Number(contractSize) < minQty) {
+        logger.error(
+          `❌ Размер позиции ${contractSize} меньше минимального ${minQty}`
+        );
+        this.isOpeningPosition = false;
+        return false;
+      }
+
       logger.info(
-        `💰 Расчет размера позиции: $${this.TRADE_SIZE_USD} / ${orderPrice} = ${rawSize} → ${contractSize}`
+        `💰 Расчет размера позиции: $${this.TRADE_SIZE_USD} / ${limitPrice} = ${rawSize} → ${contractSize}`
       );
 
       // Создаем лимитный ордер на вход
-      logger.info("\n🚀 РАЗМЕЩАЕМ ВХОДНОЙ ОРДЕР:");
+      logger.info("\n🚀 РАЗМЕЩАЕМ ЛИМИТНЫЙ ОРДЕР НА ВХОД:");
+      logger.info(`   📊 Параметры ордера:`);
+      logger.info(`   - Сторона: ${side}`);
+      logger.info(`   - Цена: ${limitPrice}`);
+      logger.info(`   - Размер: ${contractSize}`);
+      logger.info(`   - Плечо: ${this.LEVERAGE}x`);
+      logger.info(`   - Размер в USDT: $${this.TRADE_SIZE_USD}`);
+
       const orderResponse = await this.client.submitOrder({
         category: "linear",
         symbol: this.SYMBOL,
         side: side,
         orderType: "Limit",
         qty: contractSize,
-        price: orderPrice.toString(),
+        price: limitPrice.toString(),
         timeInForce: "GTC",
         positionIdx: 0,
         orderLinkId: `entry_${Date.now()}`
@@ -863,7 +677,7 @@ export class TradingLogicService {
 
       if (orderResponse.retCode !== 0) {
         logger.error(
-          `❌ Ошибка при установке входного ордера: ${orderResponse.retMsg}`
+          `❌ Ошибка при установке лимитного ордера: ${orderResponse.retMsg}`
         );
         this.isOpeningPosition = false;
         return false;
@@ -877,162 +691,129 @@ export class TradingLogicService {
       }
 
       logger.info(
-        `✅ Размещен лимитный ордер ${orderId} на ${side} по цене ${orderPrice}`
+        `✅ Размещен лимитный ордер ${orderId} на ${side} по цене ${limitPrice}`
       );
 
       // Ждем исполнения ордера
       let orderFilled = false;
-      let attempts = 0;
-      const maxAttempts = 10;
-      const checkInterval = 1000; // 1 секунда
+      let retryCount = 0;
+      const maxRetries = 10;
 
-      logger.info("\n⏳ ОЖИДАЕМ ИСПОЛНЕНИЯ ОРДЕРА:");
-      while (!orderFilled && attempts < maxAttempts) {
-        await new Promise(resolve => setTimeout(resolve, checkInterval));
-        attempts++;
+      while (!orderFilled && retryCount < maxRetries) {
+        try {
+          const orderStatus = await this.client.getOrderbook({
+            category: "linear",
+            symbol: this.SYMBOL
+          });
 
-        const orderStatus = await this.client.getHistoricOrders({
-          category: "linear",
-          symbol: this.SYMBOL,
-          orderId: orderId
-        });
+          // Проверяем позицию
+          const positionInfo = await this.client.getPositionInfo({
+            category: "linear",
+            symbol: this.SYMBOL
+          });
 
-        logger.info(
-          `   📊 Попытка ${attempts}/${maxAttempts}: ${JSON.stringify(
-            orderStatus
-          )}`
-        );
-
-        if (orderStatus.retCode === 0 && orderStatus.result?.list?.[0]) {
-          const order = orderStatus.result.list[0];
-
-          if (order.orderStatus === "Filled") {
-            orderFilled = true;
-            logger.info(
-              `✅ Ордер ${orderId} исполнен по цене ${order.avgPrice}`
-            );
-
-            // Устанавливаем TP/SL только после исполнения входного ордера
-            logger.info("\n🎯 УСТАНАВЛИВАЕМ TP/SL:");
-            const tpResponse = await this.client.submitOrder({
-              category: "linear",
-              symbol: this.SYMBOL,
-              side: side === "Buy" ? "Sell" : "Buy",
-              orderType: "Limit",
-              qty: order.cumExecQty,
-              price: takeProfit.toString(),
-              triggerPrice: takeProfit.toString(),
-              triggerDirection: side === "Buy" ? 1 : 2,
-              timeInForce: "GTC",
-              triggerBy: "MarkPrice",
-              reduceOnly: true,
-              orderLinkId: `tp_${Date.now()}`
-            });
-
-            const slResponse = await this.client.submitOrder({
-              category: "linear",
-              symbol: this.SYMBOL,
-              side: side === "Buy" ? "Sell" : "Buy",
-              orderType: "Limit",
-              qty: order.cumExecQty,
-              price: stopLoss.toString(),
-              triggerPrice: stopLoss.toString(),
-              triggerDirection: side === "Buy" ? 2 : 1,
-              timeInForce: "GTC",
-              triggerBy: "MarkPrice",
-              reduceOnly: true,
-              orderLinkId: `sl_${Date.now()}`
-            });
-
-            logger.info(
-              `   📊 Ответ на установку TP: ${JSON.stringify(tpResponse)}`
-            );
-            logger.info(
-              `   📊 Ответ на установку SL: ${JSON.stringify(slResponse)}`
-            );
-
-            if (tpResponse.retCode === 0 && slResponse.retCode === 0) {
-              // Создаем запись о позиции только после успешного исполнения
-              this.activePosition = {
-                side: side,
-                entryPrice: Number(order.avgPrice),
-                entryTime: Date.now(),
-                isTrailingActive: false,
-                lastTrailingStopPrice: stopLoss,
-                orderId: orderId,
-                plannedTakeProfit: takeProfit,
-                plannedStopLoss: stopLoss,
-                executionNotificationSent: false
-              };
-
-              // Отправляем уведомление об открытии позиции
-              const openPositionMessage = this.notificationService.formatTradeOpenAlert(
-                this.activePosition,
-                takeProfit,
-                stopLoss,
-                signalCandle,
-                currentCandle,
-                false,
-                side
-              );
-              await this.callbacks.onTradeOperation(openPositionMessage);
-
-              // Обновляем время открытия позиции
-              this.lastPositionOpenTime = Date.now();
-
-              // Запускаем проверку трейлинг-стопа
-              this.startTrailingStopCheck();
-
-              this.isOpeningPosition = false;
-              return true;
-            } else {
-              logger.error(
-                `❌ Ошибка при установке TP/SL: TP=${tpResponse.retMsg}, SL=${slResponse.retMsg}`
-              );
-            }
-          } else if (
-            order.orderStatus === "Cancelled" ||
-            order.orderStatus === "Rejected"
+          if (
+            positionInfo.retCode === 0 &&
+            positionInfo.result.list.length > 0 &&
+            positionInfo.result.list[0].size !== "0"
           ) {
-            logger.error(
-              `❌ Ордер ${orderId} отменен/отклонен: ${order.orderStatus}`
-            );
+            orderFilled = true;
+            console.log("✅ Позиция открыта, устанавливаем TP/SL");
             break;
           }
+        } catch (error) {
+          console.error("Ошибка при проверке статуса ордера:", error);
         }
 
-        logger.info(
-          `⏳ Ожидание исполнения ордера ${orderId}, попытка ${attempts}/${maxAttempts}`
-        );
+        retryCount++;
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
 
       if (!orderFilled) {
-        logger.error(
-          `❌ Ордер ${orderId} не исполнен после ${maxAttempts} попыток, отменяем`
-        );
-        await this.client.cancelOrder({
-          category: "linear",
-          symbol: this.SYMBOL,
-          orderId: orderId
-        });
+        throw new Error("Ордер не был исполнен в течение ожидаемого времени");
       }
 
+      // Рассчитываем уровни TP/SL
+      const takeProfit =
+        limitPrice +
+        (side === "Buy" ? this.TAKE_PROFIT_POINTS : -this.TAKE_PROFIT_POINTS);
+
+      // Находим экстремум из сигнальной и подтверждающей свечей
+      const extremeLevel =
+        side === "Buy"
+          ? Math.min(signalCandle.low, currentCandle.low) // Для покупки берем минимум
+          : Math.max(signalCandle.high, currentCandle.high); // Для продажи берем максимум
+
+      // Устанавливаем стоп-лосс от экстремума
+      const stopLoss =
+        side === "Buy"
+          ? extremeLevel - this.STOP_LOSS_POINTS // Для покупки стоп ниже экстремума
+          : extremeLevel + this.STOP_LOSS_POINTS; // Для продажи стоп выше экстремума
+
+      logger.info(`\n📊 РАСЧЕТ УРОВНЕЙ:`);
+      logger.info(`   💰 Цена входа: ${limitPrice}`);
+      logger.info(`   📈 Экстремум свечей: ${extremeLevel}`);
+      logger.info(`   🎯 Take Profit: ${takeProfit}`);
+      logger.info(`   🛡️ Stop Loss: ${stopLoss}`);
+
+      // Устанавливаем TP/SL только после исполнения ордера
+      console.log("🎯 УСТАНАВЛИВАЕМ TP/SL:");
+      const tpResponse = await this.client.setTradingStop({
+        category: "linear",
+        symbol: this.SYMBOL,
+        takeProfit: takeProfit.toString(),
+        stopLoss: stopLoss.toString(),
+        positionIdx: 0
+      });
+
+      if (tpResponse.retCode === 0) {
+        logger.info(
+          `✅ Установлены уровни TP=${takeProfit.toFixed(
+            2
+          )}, SL=${stopLoss.toFixed(2)}`
+        );
+      } else {
+        logger.error(`❌ Ошибка при установке TP/SL: ${tpResponse.retMsg}`);
+      }
+
+      // Создаем запись о позиции
+      this.activePosition = {
+        side: side,
+        entryPrice: limitPrice,
+        entryTime: Date.now(),
+        isTrailingActive: false,
+        lastTrailingStopPrice: stopLoss,
+        orderId: orderId,
+        plannedTakeProfit: takeProfit,
+        plannedStopLoss: stopLoss,
+        executionNotificationSent: false
+      };
+
+      // Отправляем уведомление о размещении лимитного ордера
+      const openPositionMessage = this.notificationService.formatTradeOpenAlert(
+        this.activePosition,
+        takeProfit,
+        stopLoss,
+        signalCandle,
+        currentCandle,
+        true,
+        side
+      );
+      await this.callbacks.onTradeOperation(openPositionMessage);
+
+      // Сохраняем время открытия позиции
+      this.lastPositionOpenTime = Date.now();
+
+      // Запускаем проверку трейлинг-стопа
+      this.startTrailingStopCheck();
+
       this.isOpeningPosition = false;
-      return orderFilled;
+      return true;
     } catch (error) {
       logger.error("❌ Ошибка при открытии позиции:", error);
       this.isOpeningPosition = false;
       return false;
     }
-  }
-
-  private verifyVSALogic(
-    signalCandle: Candle,
-    side: OrderSideV5
-  ): { isValid: boolean; error?: string } {
-    // Реализация проверки VSA логики
-    // Возвращаем объект с флагом isValid и, возможно, строкой с ошибкой
-    return { isValid: true };
   }
 
   public finishInitialHistoryAnalysis(): void {
@@ -1221,46 +1002,28 @@ export class TradingLogicService {
                 }
 
                 // Устанавливаем новый стоп-лосс
-                const slResponse = await this.client.submitOrder({
+                const slResponse = await this.client.setTradingStop({
                   category: "linear",
                   symbol: this.SYMBOL,
-                  side: this.activePosition.side === "Buy" ? "Sell" : "Buy",
-                  orderType: "Limit",
-                  qty: position.size.toString(),
-                  price: newStopLoss.toString(),
-                  triggerPrice: newStopLoss.toString(),
-                  triggerDirection: this.activePosition.side === "Buy" ? 2 : 1,
-                  timeInForce: "GTC",
-                  triggerBy: "MarkPrice",
-                  reduceOnly: true,
-                  orderLinkId: `sl_trailing_${Date.now()}`
+                  stopLoss: newStopLoss.toString(),
+                  positionIdx: 0
                 });
 
                 if (slResponse.retCode === 0) {
                   this.activePosition.isTrailingActive = true;
                   this.activePosition.lastTrailingStopPrice = newStopLoss;
                   logger.info(
-                    `🚀 АКТИВИРОВАН ТРЕЙЛИНГ-СТОП ЛИМИТНЫМ ОРДЕРОМ: SL=${newStopLoss.toFixed(
-                      2
-                    )}`
+                    `🚀 АКТИВИРОВАН ТРЕЙЛИНГ-СТОП: SL=${newStopLoss.toFixed(2)}`
                   );
 
-                  // Отправляем уведомление об активации трейлинг-стопа
+                  // Отправляем уведомление только при активации трейлинг-стопа
                   const trailingActivationMessage = this.notificationService.formatTrailingStopActivation();
                   await this.callbacks.onTradeOperation(
                     trailingActivationMessage
                   );
-
-                  // Отправляем уведомление об обновлении стоп-лосса
-                  const trailingUpdateMessage = this.notificationService.formatTrailingStopUpdate(
-                    newStopLoss,
-                    this.TRAILING_DISTANCE,
-                    currentPrice
-                  );
-                  await this.callbacks.onTradeOperation(trailingUpdateMessage);
                 } else {
                   logger.error(
-                    `❌ Ошибка при установке лимитного трейлинг-стопа: ${slResponse.retMsg}`
+                    `❌ Ошибка при установке трейлинг-стопа: ${slResponse.retMsg}`
                   );
                 }
               } catch (error) {
@@ -1313,19 +1076,11 @@ export class TradingLogicService {
                 }
 
                 // Устанавливаем новый стоп-лосс
-                const slResponse = await this.client.submitOrder({
+                const slResponse = await this.client.setTradingStop({
                   category: "linear",
                   symbol: this.SYMBOL,
-                  side: this.activePosition.side === "Buy" ? "Sell" : "Buy",
-                  orderType: "Limit",
-                  qty: position.size.toString(),
-                  price: optimalStopPrice.toString(),
-                  triggerPrice: optimalStopPrice.toString(),
-                  triggerDirection: this.activePosition.side === "Buy" ? 2 : 1,
-                  timeInForce: "GTC",
-                  triggerBy: "MarkPrice",
-                  reduceOnly: true,
-                  orderLinkId: `sl_trailing_${Date.now()}`
+                  stopLoss: optimalStopPrice.toString(),
+                  positionIdx: 0
                 });
 
                 if (slResponse.retCode === 0) {
@@ -1335,14 +1090,6 @@ export class TradingLogicService {
                       2
                     )} (движение цены: ${currentPrice.toFixed(2)})`
                   );
-
-                  // Отправляем уведомление об обновлении трейлинг-стопа
-                  const trailingUpdateMessage = this.notificationService.formatTrailingStopUpdate(
-                    optimalStopPrice,
-                    this.TRAILING_DISTANCE,
-                    currentPrice
-                  );
-                  await this.callbacks.onTradeOperation(trailingUpdateMessage);
                 } else {
                   logger.error(
                     `❌ Ошибка при обновлении трейлинг-стопа: ${slResponse.retMsg}`
@@ -1381,7 +1128,7 @@ export class TradingLogicService {
       const klineResponse = await this.client.getKline({
         category: "linear",
         symbol: this.SYMBOL,
-        interval: "240", // 4h
+        interval: "60", // 1h
         limit: 5 // Получаем последние 5 свечей
       });
 
@@ -1424,208 +1171,20 @@ export class TradingLogicService {
     }
   }
 
-  private async performRetrospectiveAnalysis(
-    allCandles: Candle[]
-  ): Promise<void> {
-    logger.info(
-      "🔍 Начинаем ретроспективный анализ для поиска активных сигналов..."
-    );
-
-    // Диагностика входных данных
-    logger.info(`📊 Всего получено свечей: ${allCandles.length}`);
-    logger.info("📊 СПИСОК ВСЕХ ПОЛУЧЕННЫХ СВЕЧЕЙ:");
-    allCandles.forEach(candle => {
-      logger.info(
-        `   ${new Date(candle.timestamp).toLocaleTimeString()}: ${
-          candle.confirmed ? "✅ Закрыта" : "⏳ Формируется"
-        }, V=${candle.volume.toFixed(2)}, ${candle.isGreen ? "🟢" : "🔴"}`
-      );
-    });
-
-    // Фильтруем ТОЛЬКО закрытые свечи и сортируем по времени
-    const completedCandles = allCandles
-      .filter(candle => candle.confirmed === true)
-      .sort((a, b) => a.timestamp - b.timestamp);
-
-    if (completedCandles.length < 3) {
-      logger.info(
-        "❌ Недостаточно закрытых свечей для ретроспективного анализа (нужно минимум 3)"
-      );
-      return;
+  private startPositionCheck(): void {
+    if (this.positionCheckInterval) {
+      clearInterval(this.positionCheckInterval);
     }
 
-    // Берем три последние ЗАКРЫТЫЕ свечи
-    const lastClosedCandle = completedCandles[completedCandles.length - 1];
-    const middleClosedCandle = completedCandles[completedCandles.length - 2];
-    const potentialSignalCandle = completedCandles[completedCandles.length - 3];
-
-    logger.info(`\n📊 АНАЛИЗ ПОСЛЕДНИХ ТРЕХ ЗАКРЫТЫХ СВЕЧЕЙ:`);
-    logger.info(
-      `   1️⃣ Потенциально сигнальная (${new Date(
-        potentialSignalCandle.timestamp
-      ).toLocaleTimeString()}): V=${potentialSignalCandle.volume.toFixed(2)}, ${
-        potentialSignalCandle.isGreen ? "🟢" : "🔴"
-      }, Open=${potentialSignalCandle.open}, Close=${
-        potentialSignalCandle.close
-      }`
-    );
-    logger.info(
-      `   2️⃣ Средняя (${new Date(
-        middleClosedCandle.timestamp
-      ).toLocaleTimeString()}): V=${middleClosedCandle.volume.toFixed(2)}, ${
-        middleClosedCandle.isGreen ? "🟢" : "🔴"
-      }, Open=${middleClosedCandle.open}, Close=${middleClosedCandle.close}`
-    );
-    logger.info(
-      `   3️⃣ Последняя (${new Date(
-        lastClosedCandle.timestamp
-      ).toLocaleTimeString()}): V=${lastClosedCandle.volume.toFixed(2)}, ${
-        lastClosedCandle.isGreen ? "🟢" : "🔴"
-      }, Open=${lastClosedCandle.open}, Close=${lastClosedCandle.close}`
-    );
-    logger.info(`   🎯 Порог объема: ${this.VOLUME_THRESHOLD}`);
-
-    // Проверяем объем потенциально сигнальной свечи
-    if (potentialSignalCandle.volume >= this.VOLUME_THRESHOLD) {
-      logger.info(
-        `🚨 ОБНАРУЖЕН СИГНАЛ: ВЫСОКИЙ ОБЪЕМ (${potentialSignalCandle.volume.toFixed(
-          2
-        )}) В СВЕЧЕ ${new Date(
-          potentialSignalCandle.timestamp
-        ).toLocaleTimeString()}!`
-      );
-      logger.info(
-        `💰 Цена закрытия сигнальной: ${potentialSignalCandle.close}`
-      );
-      logger.info(
-        `📊 Цвет сигнальной свечи: ${
-          potentialSignalCandle.isGreen ? "🟢 Зеленая" : "🔴 Красная"
-        }`
-      );
-
-      // Проверяем, что следующие две свечи имеют меньший объем
-      if (
-        middleClosedCandle.volume <= potentialSignalCandle.volume &&
-        lastClosedCandle.volume <= potentialSignalCandle.volume
-      ) {
-        // Создаем сигнал на основе потенциально сигнальной свечи
-        this.currentSignal = {
-          candle: potentialSignalCandle,
-          isActive: true,
-          waitingForLowerVolume: true
-        };
-        this.usedSignalTimestamps.add(potentialSignalCandle.timestamp);
-
-        logger.info(
-          `✅ ПОДТВЕРЖДЕНИЕ: Обе следующие свечи имеют меньший объем`
-        );
-        logger.info(
-          `⚡️ ГОТОВЫ К ВХОДУ В ${
-            potentialSignalCandle.isGreen ? "ШОРТ" : "ЛОНГ"
-          }`
-        );
-
-        // Явно вызываем обработку последней закрытой свечи
-        logger.info(
-          "🎯 Начинаем обработку последней закрытой свечи для входа..."
-        );
-        await this.processCompletedCandle(lastClosedCandle, completedCandles);
-      } else {
-        logger.info(
-          `⚠️ ПРОПУСК: Не все последующие свечи имеют меньший объем (${middleClosedCandle.volume.toFixed(
-            2
-          )}, ${lastClosedCandle.volume.toFixed(2)})`
-        );
-      }
-    } else {
-      logger.info(
-        `ℹ️ Объем потенциально сигнальной свечи (${potentialSignalCandle.volume.toFixed(
-          2
-        )}) меньше порога ${this.VOLUME_THRESHOLD}`
-      );
-    }
+    this.positionCheckInterval = setInterval(async () => {
+      await this.checkPositionState();
+    }, this.POSITION_CHECK_INTERVAL);
   }
 
-  private async analyzeLastCandle(): Promise<void> {
-    // Сначала сортируем все свечи по времени и фильтруем только подтвержденные
-    const completedCandles = this.candleHistory
-      .filter(candle => candle.confirmed)
-      .sort((a, b) => a.timestamp - b.timestamp);
-
-    if (completedCandles.length < 2) {
-      logger.info("Недостаточно закрытых свечей для анализа");
-      return;
-    }
-
-    logger.info(`🔍 Проверка последних закрытых свечей на готовые сигналы...`);
-
-    // Находим свечу с максимальным объемом среди подтвержденных свечей
-    const maxVolumeCandle = completedCandles.reduce(
-      (max, current) => (current.volume > max.volume ? current : max),
-      completedCandles[0]
-    );
-
-    // Находим следующую подтвержденную свечу после максимальной по объему
-    const maxVolumeCandleIndex = completedCandles.findIndex(
-      c => c.timestamp === maxVolumeCandle.timestamp
-    );
-    const confirmingCandle = completedCandles[maxVolumeCandleIndex + 1];
-
-    if (!confirmingCandle) {
-      logger.info("Нет подтверждающей свечи после сигнальной");
-      return;
-    }
-
-    logger.info(`📊 АНАЛИЗ ПОСЛЕДНИХ ДВУХ ЗАКРЫТЫХ СВЕЧЕЙ:`);
-    logger.info(
-      `   📈 Сигнальная (${new Date(
-        maxVolumeCandle.timestamp
-      ).toLocaleTimeString()}): V=${maxVolumeCandle.volume.toFixed(2)}, ${
-        maxVolumeCandle.isGreen ? "🟢" : "🔴"
-      }, Open=${maxVolumeCandle.open}, Close=${maxVolumeCandle.close}`
-    );
-    logger.info(
-      `   📈 Подтверждающая (${new Date(
-        confirmingCandle.timestamp
-      ).toLocaleTimeString()}): V=${confirmingCandle.volume.toFixed(2)}, ${
-        confirmingCandle.isGreen ? "🟢" : "🔴"
-      }, Open=${confirmingCandle.open}, Close=${confirmingCandle.close}`
-    );
-
-    // Проверяем объем сигнальной свечи
-    if (maxVolumeCandle.volume >= this.VOLUME_THRESHOLD) {
-      logger.info(
-        `🚨 ОБНАРУЖЕН СИГНАЛ: ВЫСОКИЙ ОБЪЕМ (${maxVolumeCandle.volume.toFixed(
-          2
-        )}) В СВЕЧЕ ${new Date(
-          maxVolumeCandle.timestamp
-        ).toLocaleTimeString()}!`
-      );
-      logger.info(`💰 Цена закрытия: ${maxVolumeCandle.close}`);
-      logger.info(
-        `📊 Цвет свечи: ${
-          maxVolumeCandle.isGreen ? "🟢 Зеленая" : "🔴 Красная"
-        }`
-      );
-
-      // Создаем сигнал
-      this.currentSignal = {
-        candle: maxVolumeCandle,
-        isActive: true,
-        waitingForLowerVolume: true
-      };
-      this.usedSignalTimestamps.add(maxVolumeCandle.timestamp);
-
-      // Проверяем подтверждающую свечу
-      if (confirmingCandle.volume <= maxVolumeCandle.volume) {
-        logger.info(
-          `✅ ПОДТВЕРЖДЕНИЕ: Подтверждающая свеча имеет меньший объем`
-        );
-        logger.info(
-          `⚡️ ГОТОВЫ К ВХОДУ В ${maxVolumeCandle.isGreen ? "ШОРТ" : "ЛОНГ"}`
-        );
-        await this.processCompletedCandle(confirmingCandle, completedCandles);
-      }
+  private stopPositionCheck(): void {
+    if (this.positionCheckInterval) {
+      clearInterval(this.positionCheckInterval);
+      this.positionCheckInterval = null;
     }
   }
 }

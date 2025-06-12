@@ -19,18 +19,18 @@ export class BybitService {
   private readonly apiSecret: string;
 
   private readonly SYMBOL = "SOLUSDT";
-  private readonly CANDLE_INTERVAL: string = "240";
+  private readonly CANDLE_INTERVAL: string = "60";
   private readonly CANDLE_HISTORY_SIZE = 6;
   private readonly INITIAL_HISTORY_HOURS = 48;
   private readonly LOG_INTERVAL = 15 * 60 * 1000;
   private readonly RETROSPECTIVE_ANALYSIS_SIZE = 12;
 
   private readonly TRADE_SIZE_USD = 5000;
-  private readonly TAKE_PROFIT_POINTS = 4;
-  private readonly STOP_LOSS_POINTS = 2;
-  private readonly TRAILING_ACTIVATION_POINTS = 1.5;
+  private readonly TAKE_PROFIT_POINTS = 3;
+  private readonly STOP_LOSS_POINTS = 3;
+  private readonly TRAILING_ACTIVATION_POINTS = 1;
   private readonly TRAILING_DISTANCE = 0.5;
-  private readonly VOLUME_THRESHOLD = 100000;
+  private readonly VOLUME_THRESHOLD = 600000;
   private readonly USE_TRAILING_STOP: boolean = false; // Явно указываем тип boolean
 
   private onTradeUpdate: (message: string) => void;
@@ -313,7 +313,7 @@ export class BybitService {
           close: Number(candleData.close),
           volume: Number(candleData.volume),
           turnover: Number(candleData.turnover),
-          confirmed: candleData.confirm,
+          confirmed: candleData.confirm === true,
           isGreen: Number(candleData.close) >= Number(candleData.open)
         });
       }
@@ -479,6 +479,18 @@ export class BybitService {
         const currentCandle = this.candleHistory[i];
         const previousCandle = this.candleHistory[i - 1];
 
+        // Пропускаем неподтвержденные свечи
+        if (!currentCandle.confirmed || !previousCandle.confirmed) {
+          logger.info(
+            `⏳ Пропуск неподтвержденных свечей: ${new Date(
+              currentCandle.timestamp
+            ).toLocaleTimeString()} и ${new Date(
+              previousCandle.timestamp
+            ).toLocaleTimeString()}`
+          );
+          continue;
+        }
+
         logger.info(
           `   Проверка свечи ${new Date(
             currentCandle.timestamp
@@ -496,6 +508,15 @@ export class BybitService {
           // Проверяем следующую свечу после сигнальной
           if (i + 1 < this.candleHistory.length) {
             const confirmingCandle = this.candleHistory[i + 1];
+            // Пропускаем неподтвержденную подтверждающую свечу
+            if (!confirmingCandle.confirmed) {
+              logger.info(
+                `⏳ Пропуск неподтвержденной подтверждающей свечи: ${new Date(
+                  confirmingCandle.timestamp
+                ).toLocaleTimeString()}`
+              );
+              continue;
+            }
             await this.tradingLogicService.processCompletedCandle(
               confirmingCandle,
               this.candleHistory
