@@ -1,5 +1,6 @@
-import { Candle, ActivePosition } from "./bybit.types";
-import { OrderSideV5 } from "bybit-api";
+import { Candle, ActivePosition } from "./binance.types";
+import { OrderSide } from "binance-api-node";
+import { logger } from "../utils/logger";
 
 export class NotificationService {
   constructor(
@@ -37,63 +38,112 @@ export class NotificationService {
     stopLoss: number,
     signalCandle: Candle,
     currentCandle: Candle,
-    isLimitOrder: boolean = false,
-    side: "Buy" | "Sell"
+    isLimitOrder: boolean,
+    side: "Buy" | "Sell",
+    actualTradeSize?: number,
+    candleRange?: number,
+    clusterAnalysis?: {
+      upperClusterVolume: number;
+      middleClusterVolume: number;
+      lowerClusterVolume: number;
+      dominantZone: "upper" | "middle" | "lower";
+      entryDirection: "long" | "short" | "continuation";
+    },
+    oiAnalysis?: {
+      lowerDelta: number;
+      middleDelta: number;
+      upperDelta: number;
+      comparedZone: "upper" | "lower";
+      oiTrendInZone: "up" | "down";
+      sideByOi: "Buy" | "Sell";
+    }
   ): string {
-    const contractSize = (
-      this.TRADE_SIZE_USD / activePosition.entryPrice
-    ).toFixed(3);
+    const tradeSide = side === "Buy" ? "ЛОНГ" : "ШОРТ";
+    const orderType = isLimitOrder ? "лимитного" : "рыночного";
+    const tradeSize = actualTradeSize || this.TRADE_SIZE_USD;
+    const contractSize = (tradeSize / activePosition.entryPrice).toFixed(3);
     const stopLossLevel =
       activePosition.side === "Buy"
         ? Math.min(signalCandle.low, currentCandle.low)
         : Math.max(signalCandle.high, currentCandle.high);
+
+    // Формируем информацию о кластерном анализе (только распределение, без вердикта)
+    let clusterInfo = "";
+    if (clusterAnalysis) {
+      const upperPercent = (
+        (clusterAnalysis.upperClusterVolume / signalCandle.volume) *
+        100
+      ).toFixed(1);
+      const middlePercent = (
+        (clusterAnalysis.middleClusterVolume / signalCandle.volume) *
+        100
+      ).toFixed(1);
+      const lowerPercent = (
+        (clusterAnalysis.lowerClusterVolume / signalCandle.volume) *
+        100
+      ).toFixed(1);
+
+      clusterInfo =
+        `\n📊 КЛАСТЕРНЫЙ АНАЛИЗ:\n` +
+        `📈 Верх: ${upperPercent}% | 📊 Сред: ${middlePercent}% | 📉 Низ: ${lowerPercent}%\n`;
+    }
+
+    // Формируем информацию об OI-анализе
+    let oiInfo = "";
+    if (oiAnalysis) {
+      const zoneText =
+        oiAnalysis.comparedZone === "lower" ? "нижней" : "верхней";
+      const trendText = oiAnalysis.oiTrendInZone === "down" ? "падал" : "рос";
+      oiInfo =
+        `\n📈 ОТКРЫТЫЙ ИНТЕРЕС (5м за час сигнала):\n` +
+        `📉 Низ: ${oiAnalysis.lowerDelta.toFixed(
+          2
+        )} | 📊 Сред: ${oiAnalysis.middleDelta.toFixed(
+          2
+        )} | 📈 Верх: ${oiAnalysis.upperDelta.toFixed(2)}\n` +
+        `🧭 В ${zoneText} трети OI ${trendText} → решение по OI: ${
+          oiAnalysis.sideByOi === "Buy" ? "ЛОНГ" : "ШОРТ"
+        }`;
+    }
 
     return (
       `🎯 ${
         isLimitOrder ? "ЛИМИТНЫЙ ОРДЕР РАЗМЕЩЕН" : "ОТКРЫТА НОВАЯ СДЕЛКА"
       } ${this.SYMBOL}\n\n` +
       `${activePosition.side === "Buy" ? "📈 ЛОНГ" : "📉 ШОРТ"}\n` +
-      `🆔 Order ID: ${activePosition.orderId}\n` +
-      `💵 ${isLimitOrder ? "Цена ордера" : "Цена входа"}: ${
-        activePosition.entryPrice
+      `💵 ${
+        isLimitOrder ? "Цена ордера" : "Цена входа"
+      }: ${activePosition.entryPrice.toFixed(2)}\n` +
+      `🎯 Тейк-профит: ${takeProfit.toFixed(1)}${
+        candleRange
+          ? ` (Диапазон сигнальной: ${candleRange.toFixed(4)}, ${
+              candleRange < 3 ? "узкий флет" : "нормальное движение"
+            })`
+          : ""
       }\n` +
-      `🎯 Тейк-профит: ${takeProfit.toFixed(1)}\n` +
       `🛑 Стоп-лосс: ${stopLoss.toFixed(1)}\n` +
-      `📊 Расчет стопа:\n` +
-      `  • Сигнальная свеча (${signalCandle.isGreen ? "🟢" : "🔴"}): ${
-        signalCandle.isGreen
-          ? `High=${signalCandle.high}`
-          : `Low=${signalCandle.low}`
-      }\n` +
-      `  • Текущая свеча: ${
-        signalCandle.isGreen
-          ? `High=${currentCandle.high}`
-          : `Low=${currentCandle.low}`
-      }\n` +
-      `  • Выбран ${
-        activePosition.side === "Buy" ? "минимум" : "максимум"
-      }: ${stopLossLevel}\n` +
-      `  • Стоп: ${Math.abs(this.STOP_LOSS_POINTS)} пунктов ${
-        activePosition.side === "Buy" ? "ниже" : "выше"
-      }\n` +
-      `💰 Размер позиции: $${this.TRADE_SIZE_USD} (${contractSize} BTC)\n` +
+      `💰 Размер позиции: $${tradeSize.toFixed(2)} (${contractSize} SOL)\n` +
       `📈 Потенциальная прибыль: $${(
         (Math.abs(takeProfit - activePosition.entryPrice) /
           activePosition.entryPrice) *
-        this.TRADE_SIZE_USD
+        tradeSize
       ).toFixed(2)}\n` +
       `⚠️ Максимальный убыток: $${(
         (Math.abs(stopLoss - activePosition.entryPrice) /
           activePosition.entryPrice) *
-        this.TRADE_SIZE_USD
-      ).toFixed(2)}`
+        tradeSize
+      ).toFixed(2)}` +
+      clusterInfo +
+      oiInfo
     );
   }
 
   public formatTradeCloseAlert(
     activePosition: ActivePosition,
     closePrice: number,
-    reason: string
+    reason: string,
+    realPnL?: number,
+    actualTradeSize?: number
   ): string {
     const profit =
       activePosition.side === "Buy"
@@ -101,8 +151,13 @@ export class NotificationService {
         : activePosition.entryPrice - closePrice;
 
     const profitPercent = (profit / activePosition.entryPrice) * 100;
+
+    // Используем реальный P&L из биржи, если доступен, иначе рассчитываем
+    const tradeSize = actualTradeSize || this.TRADE_SIZE_USD;
     const profitUSD =
-      (profit / activePosition.entryPrice) * this.TRADE_SIZE_USD;
+      realPnL !== undefined
+        ? realPnL
+        : profit * (tradeSize / activePosition.entryPrice);
 
     // Расчет количества пунктов
     const points = Math.abs(closePrice - activePosition.entryPrice);
@@ -121,15 +176,9 @@ export class NotificationService {
     return (
       `${resultEmoji} ПОЗИЦИЯ ЗАКРЫТА ${this.SYMBOL}\n\n` +
       `${activePosition.side === "Buy" ? "📈 ЛОНГ" : "📉 ШОРТ"}\n` +
-      `🆔 Order ID: ${activePosition.orderId || "N/A"}\n` +
       `📅 Время в сделке: ${timeString}\n\n` +
-      `💵 Цена входа: ${activePosition.entryPrice.toFixed(1)}\n` +
-      `💰 Цена выхода: ${closePrice.toFixed(1)}\n` +
-      `📏 Пунктов взято: ${points.toFixed(1)}\n\n` +
       `${profitEmoji} РЕЗУЛЬТАТ:\n` +
-      `💲 P&L: ${signPrefix}$${profitUSD.toFixed(2)}\n` +
-      `📊 Процент: ${signPrefix}${profitPercent.toFixed(2)}%\n\n` +
-      `⚠️ Причина: ${reason}`
+      `💲 P&L: ${signPrefix}$${profitUSD.toFixed(2)}\n`
     );
   }
 
@@ -155,11 +204,11 @@ export class NotificationService {
     stopLoss: number,
     signalCandle: Candle,
     currentCandle: Candle,
-    orderPrice: number
+    orderPrice: number,
+    actualTradeSize?: number
   ): string {
-    const contractSize = (
-      this.TRADE_SIZE_USD / activePosition.entryPrice
-    ).toFixed(3);
+    const tradeSize = actualTradeSize || this.TRADE_SIZE_USD;
+    const contractSize = (tradeSize / activePosition.entryPrice).toFixed(3);
     const stopLossLevel =
       activePosition.side === "Buy"
         ? Math.min(signalCandle.low, currentCandle.low)
@@ -168,44 +217,27 @@ export class NotificationService {
     return (
       `📝 ЛИМИТНЫЙ ОРДЕР РАЗМЕЩЕН ${this.SYMBOL}\n\n` +
       `${activePosition.side === "Buy" ? "📈 ЛОНГ ОРДЕР" : "📉 ШОРТ ОРДЕР"}\n` +
-      `🆔 Order ID: ${activePosition.orderId}\n` +
       `💵 Цена ордера: ${orderPrice.toFixed(1)}\n` +
       `🎯 Планируемый ТП: ${takeProfit.toFixed(1)}\n` +
       `🛑 Планируемый СЛ: ${stopLoss.toFixed(1)}\n` +
-      `📊 Расчет стопа:\n` +
-      `  • Сигнальная свеча (${signalCandle.isGreen ? "🟢" : "🔴"}): ${
-        signalCandle.isGreen
-          ? `High=${signalCandle.high}`
-          : `Low=${signalCandle.low}`
-      }\n` +
-      `  • Текущая свеча: ${
-        signalCandle.isGreen
-          ? `High=${currentCandle.high}`
-          : `Low=${currentCandle.low}`
-      }\n` +
-      `  • Выбран ${
-        activePosition.side === "Buy" ? "минимум" : "максимум"
-      }: ${stopLossLevel}\n` +
-      `  • Стоп: ${Math.abs(this.STOP_LOSS_POINTS)} пунктов ${
-        activePosition.side === "Buy" ? "ниже" : "выше"
-      }\n` +
-      `💰 Размер: $${this.TRADE_SIZE_USD} (${contractSize} BTC)\n` +
+      `💰 Размер: $${tradeSize.toFixed(2)} (${contractSize} BTC)\n` +
       `⏳ ОЖИДАЕМ ИСПОЛНЕНИЯ ОРДЕРА...`
     );
   }
 
   public formatOrderExecutedAlert(
     activePosition: ActivePosition,
-    executionPrice: number
+    executionPrice: number,
+    actualTradeSize?: number
   ): string {
-    const contractSize = (this.TRADE_SIZE_USD / executionPrice).toFixed(3);
+    const tradeSize = actualTradeSize || this.TRADE_SIZE_USD;
+    const contractSize = (tradeSize / executionPrice).toFixed(3);
 
     return (
       `✅ ОРДЕР ИСПОЛНЕН! ПОЗИЦИЯ ОТКРЫТА ${this.SYMBOL}\n\n` +
       `${activePosition.side === "Buy" ? "📈 ЛОНГ" : "📉 ШОРТ"}\n` +
-      `🆔 Order ID: ${activePosition.orderId}\n` +
       `💵 Цена исполнения: ${executionPrice.toFixed(1)}\n` +
-      `💰 Размер позиции: $${this.TRADE_SIZE_USD} (${contractSize} BTC)\n` +
+      `💰 Размер позиции: $${tradeSize.toFixed(2)} (${contractSize} SOL)\n` +
       `🎯 Позиция активна, TP/SL будут установлены автоматически`
     );
   }

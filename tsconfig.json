@@ -8,7 +8,8 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "useUnknownInCatchVariables": false
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules"]

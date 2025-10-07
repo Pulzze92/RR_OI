@@ -1,7 +1,11 @@
 import winston from 'winston';
 
+// Уровень логирования управляется переменными окружения
+// LOG_LEVEL имеет приоритет, иначе если VOLUME_DEBUG=true → debug, по умолчанию info
+const resolvedLevel = 'debug'; // Временно включаем debug для диагностики трейлинга
+
 export const logger = winston.createLogger({
-    level: 'info',
+    level: resolvedLevel,
     format: winston.format.combine(
         winston.format.timestamp(),
         winston.format.json()
