@@ -57,6 +57,8 @@ export interface TradingLogicOptions {
   volumeThreshold: number;
   useTrailingStop: boolean;
   leverage: number;
+  // Для режимов без торговли: отключает вызовы API, влияющие на торговый аккаунт
+  disableBrokerSideEffects?: boolean;
 }
 
 export class TradingLogicService {
@@ -218,23 +220,25 @@ export class TradingLogicService {
     this.USE_TRAILING_STOP = false;
     this.LEVERAGE = options.leverage;
 
-    // Устанавливаем плечо при инициализации
-    this.client
-      .futuresLeverage({
-        symbol: this.SYMBOL,
-        leverage: this.LEVERAGE
-      })
-      .then(() => {
-        logger.info(
-          `✅ Установлено кредитное плечо ${this.LEVERAGE}x для ${this.SYMBOL}`
-        );
-      })
-      .catch(error => {
-        logger.error(`❌ Ошибка при установке кредитного плеча:`, error);
-      });
+    if (!options.disableBrokerSideEffects) {
+      // Устанавливаем плечо при инициализации
+      this.client
+        .futuresLeverage({
+          symbol: this.SYMBOL,
+          leverage: this.LEVERAGE
+        })
+        .then(() => {
+          logger.info(
+            `✅ Установлено кредитное плечо ${this.LEVERAGE}x для ${this.SYMBOL}`
+          );
+        })
+        .catch(error => {
+          logger.error(`❌ Ошибка при установке кредитного плеча:`, error);
+        });
 
-    // Запускаем периодическую проверку позиции
-    this.startPositionCheck();
+      // Запускаем периодическую проверку позиции
+      this.startPositionCheck();
+    }
   }
 
   // Начать сбор данных через WebSocket для текущей свечи

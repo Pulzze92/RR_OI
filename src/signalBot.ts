@@ -65,7 +65,8 @@ async function main() {
     trailingDistance: 1.5,
     volumeThreshold: volumeThreshold,
     useTrailingStop: false,
-    leverage
+    leverage,
+    disableBrokerSideEffects: true
   };
   const analysisService = new TradingLogicService(
     binance.getClient(),
@@ -87,6 +88,53 @@ async function main() {
   // Исторические данные для разгона
   const initial = await binance.getHistoricalCandles(symbol, "1h" as any, 5);
   candleHistory = initial.slice(-5);
+  // Анализ исторических данных в стиле основного бота (поиск сигнальной и подтверждающей)
+  if (candleHistory.length >= 5) {
+    const lastCandles = candleHistory.slice(-5);
+    logger.info(`📊 Анализ последних 5 свечей:`);
+    lastCandles.forEach((c, i) =>
+      logger.info(
+        `   ${i + 1}. ${new Date(
+          c.timestamp
+        ).toLocaleString()} - V=${c.volume.toFixed(2)} ${
+          c.isGreen ? "🟢" : "🔴"
+        }`
+      )
+    );
+    logger.info(`   Порог объема: ${volumeThreshold}`);
+
+    for (let i = 0; i < lastCandles.length - 1; i++) {
+      const curr = lastCandles[i];
+      const prev = i > 0 ? lastCandles[i - 1] : null;
+      if (
+        curr.volume > volumeThreshold &&
+        (!prev || curr.volume > prev.volume)
+      ) {
+        logger.info(
+          `🎯 НАЙДЕН ИСТОРИЧЕСКИЙ СИГНАЛ: ${new Date(
+            curr.timestamp
+          ).toLocaleString()} - V=${curr.volume.toFixed(2)}`
+        );
+        const nextCandles = lastCandles.slice(i + 1);
+        const confirming = nextCandles.find(c => c.volume < curr.volume);
+        if (confirming) {
+          logger.info(
+            `✅ НАЙДЕНО ПОДТВЕРЖДЕНИЕ: ${new Date(
+              confirming.timestamp
+            ).toLocaleString()}, V=${confirming.volume.toFixed(
+              2
+            )} < ${curr.volume.toFixed(2)}`
+          );
+          // Ставим текущий сигнал, дальше реальное подтверждение придет в WebSocket
+          currentSignal = { candle: curr };
+        } else {
+          logger.info(
+            "⚠️ Подтверждения в исторических данных нет, ждем вебсокет..."
+          );
+        }
+      }
+    }
+  }
 
   // Стрим сделок для фиксации цены входа и отслеживания TP/SL
   try {
