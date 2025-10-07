@@ -125,6 +125,64 @@ async function main() {
               2
             )} < ${curr.volume.toFixed(2)}`
           );
+          // Логируем кластерный анализ и OI как в основном боте
+          try {
+            if (prev) {
+              const clusterAnalysis = await analysisService.analyzeVolumeClusters(
+                curr,
+                prev
+              );
+              const upperPercent = (
+                (clusterAnalysis.upperClusterVolume / curr.volume) *
+                100
+              ).toFixed(1);
+              const middlePercent = (
+                (clusterAnalysis.middleClusterVolume / curr.volume) *
+                100
+              ).toFixed(1);
+              const lowerPercent = (
+                (clusterAnalysis.lowerClusterVolume / curr.volume) *
+                100
+              ).toFixed(1);
+              logger.info(
+                `\n📊 КЛАСТЕРЫ: Верх=${upperPercent}% | Сред=${middlePercent}% | Низ=${lowerPercent}% | Зона=${clusterAnalysis.dominantZone}`
+              );
+              try {
+                const oiZones = await analysisService.analyzeOpenInterestZones(
+                  curr
+                );
+                if (oiZones) {
+                  const topVolZone =
+                    clusterAnalysis.upperClusterVolume >=
+                    clusterAnalysis.lowerClusterVolume
+                      ? "upper"
+                      : "lower";
+                  const zoneDelta =
+                    topVolZone === "upper"
+                      ? oiZones.upperDelta
+                      : oiZones.lowerDelta;
+                  const oiTrend = zoneDelta >= 0 ? "рост" : "падение";
+                  const sideByOi =
+                    topVolZone === "lower"
+                      ? zoneDelta < 0
+                        ? "ЛОНГ"
+                        : "ШОРТ"
+                      : zoneDelta < 0
+                      ? "ШОРТ"
+                      : "ЛОНГ";
+                  logger.info(
+                    `📈 OI(5м/час): low=${oiZones.lowerDelta.toFixed(
+                      2
+                    )} | mid=${oiZones.middleDelta.toFixed(
+                      2
+                    )} | up=${oiZones.upperDelta.toFixed(
+                      2
+                    )} → зона=${topVolZone}, в зоне ${oiTrend} → ${sideByOi}`
+                  );
+                }
+              } catch {}
+            }
+          } catch {}
           // Ставим текущий сигнал, дальше реальное подтверждение придет в WebSocket
           currentSignal = { candle: curr };
         } else {
@@ -292,6 +350,14 @@ async function main() {
               }
             } catch (e) {}
           } catch (e) {}
+
+          // Дублируем сводки кластеров и OI в логи
+          if (clusterInfo) {
+            logger.info(clusterInfo);
+          }
+          if (oiInfo) {
+            logger.info(oiInfo);
+          }
 
           await telegram.sendMessage(
             formatSignalMessage({
