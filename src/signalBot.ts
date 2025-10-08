@@ -38,8 +38,8 @@ async function main() {
   const leverage = 6; // плечо 1:6
   const notionalUsd = baseCapitalUsd * leverage; // размер позиции в долларах
   const volumeThreshold = 100000; // порог объема для сигнала
-  const takeProfitPoints = 1.0; // TP = $1
-  const stopLossPoints = 0.5; // SL = $0.5
+  const takeProfitPoints = 1.5; // TP = $1.5
+  const stopLossPoints = 1.0; // SL = $1
 
   const telegram = new TelegramService(
     TELEGRAM_BOT_TOKEN as string,
