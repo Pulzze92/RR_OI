@@ -183,8 +183,148 @@ async function main() {
               } catch {}
             }
           } catch {}
-          // Ставим текущий сигнал, дальше реальное подтверждение придет в WebSocket
-          currentSignal = { candle: curr };
+          // Если подтверждающая свеча уже в истории — входим немедленно по её закрытию
+          try {
+            if (!trackers.some(tr => tr.id === `${curr.timestamp}`)) {
+              const signalCandle = curr;
+              let side: Side = signalCandle.isGreen ? "Buy" : "Sell";
+              try {
+                if (prev) {
+                  const clusterAnalysis = await analysisService.analyzeVolumeClusters(
+                    signalCandle,
+                    prev
+                  );
+                  try {
+                    const oiZones = await analysisService.analyzeOpenInterestZones(
+                      signalCandle
+                    );
+                    if (oiZones) {
+                      const comparedZone =
+                        clusterAnalysis.upperClusterVolume >=
+                        clusterAnalysis.lowerClusterVolume
+                          ? "upper"
+                          : "lower";
+                      const zoneDelta =
+                        comparedZone === "upper"
+                          ? oiZones.upperDelta
+                          : oiZones.lowerDelta;
+                      side =
+                        comparedZone === "lower"
+                          ? zoneDelta < 0
+                            ? "Buy"
+                            : "Sell"
+                          : zoneDelta < 0
+                          ? "Sell"
+                          : "Buy";
+                    }
+                  } catch {}
+                }
+              } catch {}
+
+              const entry = confirming.close;
+              logger.info(
+                `   💡 Источник цены входа (историческое подтверждение): close подтверждающей свечи ${new Date(
+                  confirming.timestamp
+                ).toLocaleString()} = ${entry.toFixed(3)}`
+              );
+              const { tp, sl } = calcTpSl(
+                entry,
+                side,
+                takeProfitPoints,
+                stopLossPoints
+              );
+              const qty = notionalUsd / entry;
+
+              const tracker: ActiveTracker = {
+                id: `${signalCandle.timestamp}`,
+                side,
+                entryPrice: entry,
+                tpPrice: tp,
+                slPrice: sl,
+                notionalUsd,
+                quantityAsset: qty,
+                createdAt: Date.now(),
+                resolved: false
+              };
+              trackers.push(tracker);
+
+              // Подготовим расширенную информацию (кластеры и OI) для сообщения
+              let clusterInfo = "";
+              let oiInfo = "";
+              try {
+                const clusterAnalysis = await analysisService.analyzeVolumeClusters(
+                  signalCandle,
+                  prev as Candle
+                );
+                const upperPercentMsg = (
+                  (clusterAnalysis.upperClusterVolume / signalCandle.volume) *
+                  100
+                ).toFixed(1);
+                const middlePercentMsg = (
+                  (clusterAnalysis.middleClusterVolume / signalCandle.volume) *
+                  100
+                ).toFixed(1);
+                const lowerPercentMsg = (
+                  (clusterAnalysis.lowerClusterVolume / signalCandle.volume) *
+                  100
+                ).toFixed(1);
+                clusterInfo = `\n📊 КЛАСТЕРЫ: Верх ${upperPercentMsg}% | Сред ${middlePercentMsg}% | Низ ${lowerPercentMsg}%`;
+                try {
+                  const oiZones = await analysisService.analyzeOpenInterestZones(
+                    signalCandle
+                  );
+                  if (oiZones) {
+                    const comparedZone =
+                      clusterAnalysis.upperClusterVolume >=
+                      clusterAnalysis.lowerClusterVolume
+                        ? "upper"
+                        : "lower";
+                    const zoneDelta =
+                      comparedZone === "upper"
+                        ? oiZones.upperDelta
+                        : oiZones.lowerDelta;
+                    const oiTrend = zoneDelta >= 0 ? "рост" : "падение";
+                    oiInfo = `\n📈 OI(5м/час): low=${oiZones.lowerDelta.toFixed(
+                      2
+                    )} | mid=${oiZones.middleDelta.toFixed(
+                      2
+                    )} | up=${oiZones.upperDelta.toFixed(
+                      2
+                    )} → зона=${comparedZone}, в зоне ${oiTrend}`;
+                  }
+                } catch {}
+              } catch {}
+
+              await telegram.sendMessage(
+                formatSignalMessage({
+                  symbol,
+                  side,
+                  entry,
+                  tp,
+                  sl,
+                  baseCapitalUsd,
+                  leverage,
+                  notionalUsd
+                }) +
+                  clusterInfo +
+                  oiInfo
+              );
+
+              logger.info(
+                `🎯 Сигнал: ${side} @ ${entry.toFixed(3)} | TP ${tp.toFixed(
+                  3
+                )} | SL ${sl.toFixed(3)} | notional $${notionalUsd}`
+              );
+
+              // Сигнал отработан
+              currentSignal = null;
+            }
+          } catch (e) {
+            logger.warn(
+              "⚠️ Не удалось отправить сигнал по историческому подтверждению",
+              e
+            );
+          }
         } else {
           logger.info(
             "⚠️ Подтверждения в исторических данных нет, ждем вебсокет..."
@@ -281,7 +421,12 @@ async function main() {
             // Если кластеры недоступны — остаемся на базовом направлении по цвету свечи
           }
 
-          const entry = latestTradePrice > 0 ? latestTradePrice : candle.close;
+          const entry = candle.close;
+          logger.info(
+            `   💡 Источник цены входа: close подтверждающей свечи ${new Date(
+              candle.timestamp
+            ).toLocaleString()} = ${entry.toFixed(3)}`
+          );
           const { tp, sl } = calcTpSl(
             entry,
             side,
