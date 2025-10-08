@@ -37,7 +37,7 @@ async function main() {
   const baseCapitalUsd = 3000; // капитал пользователя
   const leverage = 6; // плечо 1:6
   const notionalUsd = baseCapitalUsd * leverage; // размер позиции в долларах
-  const volumeThreshold = 150000; // порог объема для сигнала (15m)
+  const volumeThreshold = 100000; // порог объема для сигнала (15m)
   const takeProfitPoints = 1.0; // TP = $1
   const stopLossPoints = 0.5; // буфер к экстремуму для SL
 
