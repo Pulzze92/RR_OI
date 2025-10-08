@@ -37,9 +37,9 @@ async function main() {
   const baseCapitalUsd = 3000; // капитал пользователя
   const leverage = 6; // плечо 1:6
   const notionalUsd = baseCapitalUsd * leverage; // размер позиции в долларах
-  const volumeThreshold = 100000; // порог объема для сигнала
-  const takeProfitPoints = 1.5; // TP = $1.5
-  const stopLossPoints = 1.0; // SL = $1
+  const volumeThreshold = 150000; // порог объема для сигнала (15m)
+  const takeProfitPoints = 1.0; // TP = $1
+  const stopLossPoints = 0.5; // буфер к экстремуму для SL
 
   const telegram = new TelegramService(
     TELEGRAM_BOT_TOKEN as string,
@@ -89,7 +89,7 @@ async function main() {
   const trackers: ActiveTracker[] = [];
 
   // Исторические данные для разгона
-  const initial = await binance.getHistoricalCandles(symbol, "1h" as any, 5);
+  const initial = await binance.getHistoricalCandles(symbol, "15m" as any, 5);
   candleHistory = initial.slice(-5);
   // Анализ исторических данных в стиле основного бота (поиск сигнальной и подтверждающей)
   if (candleHistory.length >= 5) {
@@ -133,6 +133,7 @@ async function main() {
             "⏭ Пропуск исторического входа при запуске; ждем онлайн-подтверждения"
           );
           continue;
+          /* ЛОГИ И ИСТОРИЧЕСКИЙ ВХОД ОТКЛЮЧЕНЫ ПРИ СТАРТЕ
           // Логируем кластерный анализ и OI как в основном боте
           try {
             if (prev) {
@@ -333,6 +334,7 @@ async function main() {
               e
             );
           }
+        */
         } else {
           logger.info(
             "⚠️ Подтверждения в исторических данных нет, ждем вебсокет..."
@@ -375,214 +377,224 @@ async function main() {
     );
   }
 
-  // WebSocket свечей (1h), детекция сигнала и подтверждения
-  await binance.startWebSocket(symbol, async (candle: Candle) => {
-    try {
-      if (!candle.confirmed) return;
+  // WebSocket свечей (15m), детекция сигнала и подтверждения
+  await binance.startWebSocket(
+    symbol,
+    async (candle: Candle) => {
+      try {
+        if (!candle.confirmed) return;
 
-      // Добавляем свечу в историю и ограничиваем размер
-      candleHistory.push(candle);
-      if (candleHistory.length > 6) candleHistory = candleHistory.slice(-6);
+        // Добавляем свечу в историю и ограничиваем размер
+        candleHistory.push(candle);
+        if (candleHistory.length > 6) candleHistory = candleHistory.slice(-6);
 
-      const prev = findPreviousConfirmed(candleHistory, candle.timestamp);
-      if (!prev) return;
+        const prev = findPreviousConfirmed(candleHistory, candle.timestamp);
+        if (!prev) return;
 
-      // Если уже есть активный сигнальный бар — подтверждение только на СЛЕДУЮЩЕЙ свече
-      if (currentSignal) {
-        const expectedTs = currentSignal.expectedConfirmTs;
-        if (candle.timestamp > expectedTs) {
-          logger.warn(
-            `⌛ Сигнал протух: ожидали подтверждение на ${new Date(
-              expectedTs
-            ).toLocaleTimeString()}, пришла более поздняя свеча ${new Date(
-              candle.timestamp
-            ).toLocaleTimeString()}`
-          );
-          currentSignal = null;
-        } else if (
-          candle.timestamp === expectedTs &&
-          candle.volume < currentSignal.candle.volume
-        ) {
-          // Подтверждение получено — формируем направление и создаем трекер
-          const signalCandle = currentSignal.candle;
-          // Определяем направление 1-в-1 по логике TradingLogicService (кластеры + OI)
-          let side: Side = signalCandle.isGreen ? "Buy" : "Sell";
-          try {
-            const clusterAnalysis = await analysisService.analyzeVolumeClusters(
-              signalCandle,
-              prev
+        // Если уже есть активный сигнальный бар — подтверждение только на СЛЕДУЮЩЕЙ свече
+        if (currentSignal) {
+          const expectedTs = currentSignal.expectedConfirmTs;
+          if (candle.timestamp > expectedTs) {
+            logger.warn(
+              `⌛ Сигнал протух: ожидали подтверждение на ${new Date(
+                expectedTs
+              ).toLocaleTimeString()}, пришла более поздняя свеча ${new Date(
+                candle.timestamp
+              ).toLocaleTimeString()}`
             );
+            currentSignal = null;
+          } else if (
+            candle.timestamp === expectedTs &&
+            candle.volume < currentSignal.candle.volume
+          ) {
+            // Подтверждение получено — формируем направление и создаем трекер
+            const signalCandle = currentSignal.candle;
+            // Определяем направление 1-в-1 по логике TradingLogicService (кластеры + OI)
+            let side: Side = signalCandle.isGreen ? "Buy" : "Sell";
             try {
-              const oiZones = await analysisService.analyzeOpenInterestZones(
-                signalCandle
+              const clusterAnalysis = await analysisService.analyzeVolumeClusters(
+                signalCandle,
+                prev as Candle,
+                15 * 60 * 1000
               );
-              if (oiZones) {
-                const comparedZone =
-                  clusterAnalysis.upperClusterVolume >=
-                  clusterAnalysis.lowerClusterVolume
-                    ? "upper"
-                    : "lower";
-                const zoneDelta =
-                  comparedZone === "upper"
-                    ? oiZones.upperDelta
-                    : oiZones.lowerDelta;
-                side =
-                  comparedZone === "lower"
-                    ? zoneDelta < 0
-                      ? "Buy"
-                      : "Sell"
-                    : zoneDelta < 0
-                    ? "Sell"
-                    : "Buy";
+              try {
+                const oiZones = await analysisService.analyzeOpenInterestZones(
+                  signalCandle,
+                  15 * 60 * 1000
+                );
+                if (oiZones != null) {
+                  const comparedZone =
+                    clusterAnalysis.upperClusterVolume >=
+                    clusterAnalysis.lowerClusterVolume
+                      ? "upper"
+                      : "lower";
+                  const zoneDelta =
+                    comparedZone === "upper"
+                      ? oiZones.upperDelta
+                      : oiZones.lowerDelta;
+                  side =
+                    comparedZone === "lower"
+                      ? zoneDelta < 0
+                        ? "Buy"
+                        : "Sell"
+                      : zoneDelta < 0
+                      ? "Sell"
+                      : "Buy";
+                }
+              } catch (e) {
+                // Если OI недоступен — остаемся на базовом направлении по цвету свечи
               }
             } catch (e) {
-              // Если OI недоступен — остаемся на базовом направлении по цвету свечи
+              // Если кластеры недоступны — остаемся на базовом направлении по цвету свечи
             }
-          } catch (e) {
-            // Если кластеры недоступны — остаемся на базовом направлении по цвету свечи
-          }
 
-          const entry = candle.close;
-          logger.info(
-            `   💡 Источник цены входа: close подтверждающей свечи ${new Date(
-              candle.timestamp
-            ).toLocaleString()} = ${entry.toFixed(3)}`
-          );
-          const { tp, sl } = calcTpSl(
-            entry,
-            side,
-            takeProfitPoints,
-            stopLossPoints
-          );
-          const qty = notionalUsd / entry;
-
-          const tracker: ActiveTracker = {
-            id: `${signalCandle.timestamp}`,
-            side,
-            entryPrice: entry,
-            tpPrice: tp,
-            slPrice: sl,
-            notionalUsd,
-            quantityAsset: qty,
-            createdAt: Date.now(),
-            resolved: false
-          };
-          trackers.push(tracker);
-
-          // Отправляем сигнал в Telegram
-          // Подготовим расширенную информацию (кластеры и OI) для сообщения
-          let clusterInfo = "";
-          let oiInfo = "";
-          try {
-            const clusterAnalysis = await analysisService.analyzeVolumeClusters(
-              signalCandle,
-              prev
+            const entry = candle.close;
+            logger.info(
+              `   💡 Источник цены входа: close подтверждающей свечи ${new Date(
+                candle.timestamp
+              ).toLocaleString()} = ${entry.toFixed(3)}`
             );
-            const upperPercent = (
-              (clusterAnalysis.upperClusterVolume / signalCandle.volume) *
-              100
-            ).toFixed(1);
-            const middlePercent = (
-              (clusterAnalysis.middleClusterVolume / signalCandle.volume) *
-              100
-            ).toFixed(1);
-            const lowerPercent = (
-              (clusterAnalysis.lowerClusterVolume / signalCandle.volume) *
-              100
-            ).toFixed(1);
-            clusterInfo = `\n📊 КЛАСТЕРЫ: Верх ${upperPercent}% | Сред ${middlePercent}% | Низ ${lowerPercent}%`;
-            try {
-              const oiZones = await analysisService.analyzeOpenInterestZones(
-                signalCandle
-              );
-              if (oiZones) {
-                const comparedZone =
-                  clusterAnalysis.upperClusterVolume >=
-                  clusterAnalysis.lowerClusterVolume
-                    ? "upper"
-                    : "lower";
-                const zoneDelta =
-                  comparedZone === "upper"
-                    ? oiZones.upperDelta
-                    : oiZones.lowerDelta;
-                const oiTrend = zoneDelta >= 0 ? "рост" : "падение";
-                oiInfo = `\n📈 OI(5м/час): low=${oiZones.lowerDelta.toFixed(
-                  2
-                )} | mid=${oiZones.middleDelta.toFixed(
-                  2
-                )} | up=${oiZones.upperDelta.toFixed(
-                  2
-                )} → зона=${comparedZone}, в зоне ${oiTrend}`;
-              }
-            } catch (e) {}
-          } catch (e) {}
-
-          // Дублируем сводки кластеров и OI в логи
-          if (clusterInfo) {
-            logger.info(clusterInfo);
-          }
-          if (oiInfo) {
-            logger.info(oiInfo);
-          }
-
-          await telegram.sendMessage(
-            formatSignalMessage({
-              symbol,
-              side,
+            const { tp, sl } = calcTpSlFlexible(
               entry,
-              tp,
-              sl,
-              baseCapitalUsd,
-              leverage,
-              notionalUsd
-            }) +
-              clusterInfo +
-              oiInfo
-          );
+              side,
+              signalCandle,
+              candle,
+              takeProfitPoints,
+              stopLossPoints
+            );
+            const qty = notionalUsd / entry;
 
-          logger.info(
-            `🎯 Сигнал: ${side} @ ${entry.toFixed(3)} | TP ${tp.toFixed(
-              3
-            )} | SL ${sl.toFixed(3)} | notional $${notionalUsd}`
-          );
+            const tracker: ActiveTracker = {
+              id: `${signalCandle.timestamp}`,
+              side,
+              entryPrice: entry,
+              tpPrice: tp,
+              slPrice: sl,
+              notionalUsd,
+              quantityAsset: qty,
+              createdAt: Date.now(),
+              resolved: false
+            };
+            trackers.push(tracker);
 
-          // Сбрасываем текущий сигнал — он отработан
-          currentSignal = null;
-          return;
-        } else if (
-          candle.timestamp === expectedTs &&
-          candle.volume >= currentSignal.candle.volume
-        ) {
-          logger.info(
-            `❌ Подтверждение не выполнено на следующей свече (${new Date(
-              candle.timestamp
-            ).toLocaleTimeString()}), сигнал отменен`
-          );
-          currentSignal = null;
+            // Отправляем сигнал в Telegram
+            // Подготовим расширенную информацию (кластеры и OI) для сообщения
+            let clusterInfo = "";
+            let oiInfo = "";
+            try {
+              const clusterAnalysis = await analysisService.analyzeVolumeClusters(
+                signalCandle,
+                prev as Candle,
+                15 * 60 * 1000
+              );
+              const upperPercent = (
+                (clusterAnalysis.upperClusterVolume / signalCandle.volume) *
+                100
+              ).toFixed(1);
+              const middlePercent = (
+                (clusterAnalysis.middleClusterVolume / signalCandle.volume) *
+                100
+              ).toFixed(1);
+              const lowerPercent = (
+                (clusterAnalysis.lowerClusterVolume / signalCandle.volume) *
+                100
+              ).toFixed(1);
+              clusterInfo = `\n📊 КЛАСТЕРЫ: Верх ${upperPercent}% | Сред ${middlePercent}% | Низ ${lowerPercent}%`;
+              try {
+                const oiZones = await analysisService.analyzeOpenInterestZones(
+                  signalCandle,
+                  15 * 60 * 1000
+                );
+                if (oiZones != null) {
+                  const comparedZone =
+                    clusterAnalysis.upperClusterVolume >=
+                    clusterAnalysis.lowerClusterVolume
+                      ? "upper"
+                      : "lower";
+                  const zoneDelta =
+                    comparedZone === "upper"
+                      ? oiZones.upperDelta
+                      : oiZones.lowerDelta;
+                  const oiTrend = zoneDelta >= 0 ? "рост" : "падение";
+                  oiInfo = `\n📈 OI(5м/час): low=${oiZones.lowerDelta.toFixed(
+                    2
+                  )} | mid=${oiZones.middleDelta.toFixed(
+                    2
+                  )} | up=${oiZones.upperDelta.toFixed(
+                    2
+                  )} → зона=${comparedZone}, в зоне ${oiTrend}`;
+                }
+              } catch (e) {}
+            } catch (e) {}
+
+            // Дублируем сводки кластеров и OI в логи
+            if (clusterInfo) {
+              logger.info(clusterInfo);
+            }
+            if (oiInfo) {
+              logger.info(oiInfo);
+            }
+
+            await telegram.sendMessage(
+              formatSignalMessage({
+                symbol,
+                side,
+                entry,
+                tp,
+                sl,
+                baseCapitalUsd,
+                leverage,
+                notionalUsd
+              }) +
+                clusterInfo +
+                oiInfo
+            );
+
+            logger.info(
+              `🎯 Сигнал: ${side} @ ${entry.toFixed(3)} | TP ${tp.toFixed(
+                3
+              )} | SL ${sl.toFixed(3)} | notional $${notionalUsd}`
+            );
+
+            // Сбрасываем текущий сигнал — он отработан
+            currentSignal = null;
+            return;
+          } else if (
+            candle.timestamp === expectedTs &&
+            candle.volume >= currentSignal.candle.volume
+          ) {
+            logger.info(
+              `❌ Подтверждение не выполнено на следующей свече (${new Date(
+                candle.timestamp
+              ).toLocaleTimeString()}), сигнал отменен`
+            );
+            currentSignal = null;
+          }
+          // Если подтверждение не пришло – просто продолжаем ждать
         }
-        // Если подтверждение не пришло – просто продолжаем ждать
-      }
 
-      // Иначе ищем новый сигнальный бар: объем > порога и > предыдущей свечи
-      if (candle.volume > volumeThreshold && candle.volume > prev.volume) {
-        currentSignal = {
-          candle,
-          expectedConfirmTs: candle.timestamp + 60 * 60 * 1000
-        };
-        logger.info(
-          `📢 Обнаружен сигнальный бар: ${new Date(
-            candle.timestamp
-          ).toLocaleString()} V=${candle.volume.toFixed(
-            2
-          )} (порог=${volumeThreshold}). Ждем подтверждение на ${new Date(
-            currentSignal.expectedConfirmTs
-          ).toLocaleTimeString()}`
-        );
+        // Иначе ищем новый сигнальный бар: объем > порога и > предыдущей свечи
+        if (candle.volume > volumeThreshold && candle.volume > prev.volume) {
+          currentSignal = {
+            candle,
+            expectedConfirmTs: candle.timestamp + 15 * 60 * 1000
+          };
+          logger.info(
+            `📢 Обнаружен сигнальный бар: ${new Date(
+              candle.timestamp
+            ).toLocaleString()} V=${candle.volume.toFixed(
+              2
+            )} (порог=${volumeThreshold}). Ждем подтверждение на ${new Date(
+              currentSignal.expectedConfirmTs
+            ).toLocaleTimeString()}`
+          );
+        }
+      } catch (error) {
+        logger.error("Ошибка в обработчике свечей сигнального режима:", error);
       }
-    } catch (error) {
-      logger.error("Ошибка в обработчике свечей сигнального режима:", error);
-    }
-  });
+    },
+    "15m" as any
+  );
 }
 
 function findPreviousConfirmed(history: Candle[], ts: number): Candle | null {
@@ -597,6 +609,22 @@ function calcTpSl(entry: number, side: Side, tpPts: number, slPts: number) {
     return { tp: entry + tpPts, sl: entry - slPts };
   }
   return { tp: entry - tpPts, sl: entry + slPts };
+}
+
+// Динамический SL: берем дальний экстремум из сигнальной и подтверждающей свечей + 0.5$ буфер
+function calcTpSlFlexible(
+  entry: number,
+  side: Side,
+  signalCandle: Candle,
+  confirmCandle: Candle,
+  tpPts: number,
+  buffer: number
+) {
+  const tp = side === "Buy" ? entry + tpPts : entry - tpPts;
+  const highExtreme = Math.max(signalCandle.high, confirmCandle.high);
+  const lowExtreme = Math.min(signalCandle.low, confirmCandle.low);
+  const sl = side === "Buy" ? lowExtreme - buffer : highExtreme + buffer;
+  return { tp, sl };
 }
 
 function resolveTracker(

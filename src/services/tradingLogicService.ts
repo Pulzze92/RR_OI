@@ -79,7 +79,8 @@ export class TradingLogicService {
 
   // Анализ OI по 5-минутным свечам внутри часа сигнальной свечи и распределение по зонам (низ/сред/верх)
   public async analyzeOpenInterestZones(
-    signalCandle: Candle
+    signalCandle: Candle,
+    windowMs: number = 60 * 60 * 1000 // по умолчанию 1 час
   ): Promise<{
     lowerDelta: number;
     middleDelta: number;
@@ -87,15 +88,15 @@ export class TradingLogicService {
   } | null> {
     try {
       const startTime = signalCandle.timestamp;
-      const endTime = startTime + 60 * 60 * 1000 - 1;
+      const endTime = startTime + windowMs - 1;
 
-      // 12 пятиминутных свечей для данного часа
+      // 5-минутные свечи внутри окна
       const fiveMinCandles = await this.client.futuresCandles({
         symbol: this.SYMBOL,
         interval: "5m" as any,
         startTime,
         endTime,
-        limit: 12
+        limit: Math.min(1000, Math.ceil(windowMs / (5 * 60 * 1000)))
       });
 
       // Исторический OI (USDT-M): futures/data/openInterestHist
@@ -1215,7 +1216,8 @@ export class TradingLogicService {
   // Реальный кластерный анализ на основе WebSocket или API данных
   public async analyzeVolumeClusters(
     signalCandle: Candle,
-    previousCandle: Candle
+    previousCandle: Candle,
+    windowMs: number = 60 * 60 * 1000 // по умолчанию 1 час
   ): Promise<ClusterAnalysisResult> {
     // Проверяем, нужен ли кластерный анализ для этой свечи
     if (!this.shouldAnalyzeClusters(signalCandle)) {
@@ -1235,8 +1237,8 @@ export class TradingLogicService {
         symbol: this.SYMBOL,
         interval: "1m",
         startTime: signalCandle.timestamp,
-        endTime: signalCandle.timestamp + 60 * 60 * 1000, // +1 час
-        limit: 60
+        endTime: signalCandle.timestamp + windowMs,
+        limit: Math.min(1000, Math.ceil(windowMs / (60 * 1000)))
       });
 
       if (minuteCandles.length === 0) {

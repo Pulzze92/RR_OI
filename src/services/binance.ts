@@ -41,7 +41,8 @@ export class BinanceService {
 
   public async startWebSocket(
     symbol: string,
-    onCandleUpdate: (candle: Candle) => void
+    onCandleUpdate: (candle: Candle) => void,
+    interval: CandleChartInterval = "1h" as any
   ) {
     const connectWebSocket = () => {
       try {
@@ -53,13 +54,25 @@ export class BinanceService {
         // Создаем WebSocket подключение для фьючерсов
         this.wsClient = this.client.ws.futuresCandles(
           symbol,
-          "1h",
+          interval,
           (candle: any) => {
             // Определяем confirmed более надежно
             const isConfirmed = candle.isFinal === true || candle.isFinal === 1;
             const currentTime = Date.now();
+            // Длительность свече в мс исходя из интервала
+            const intervalMs =
+              interval === "1m"
+                ? 60 * 1000
+                : interval === "15m"
+                ? 15 * 60 * 1000
+                : interval === "5m"
+                ? 5 * 60 * 1000
+                : interval === "1h"
+                ? 60 * 60 * 1000
+                : 60 * 60 * 1000;
+
             const candleEndTime =
-              (candle.openTime || candle.startTime) + 60 * 60 * 1000; // +1 час для часовой свечи
+              (candle.openTime || candle.startTime) + intervalMs;
 
             // Если свеча уже должна быть закрыта по времени, считаем её confirmed
             const shouldBeConfirmed = currentTime > candleEndTime;
