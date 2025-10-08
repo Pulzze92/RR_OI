@@ -81,7 +81,10 @@ async function main() {
 
   // Состояние
   let candleHistory: Candle[] = [];
-  let currentSignal: { candle: Candle } | null = null;
+  let currentSignal: {
+    candle: Candle;
+    expectedConfirmTs: number;
+  } | null = null;
   let latestTradePrice = 0;
   const trackers: ActiveTracker[] = [];
 
@@ -125,6 +128,11 @@ async function main() {
               2
             )} < ${curr.volume.toFixed(2)}`
           );
+          // На старте вход по историческому подтверждению не выполняем
+          logger.info(
+            "⏭ Пропуск исторического входа при запуске; ждем онлайн-подтверждения"
+          );
+          continue;
           // Логируем кластерный анализ и OI как в основном боте
           try {
             if (prev) {
@@ -379,9 +387,22 @@ async function main() {
       const prev = findPreviousConfirmed(candleHistory, candle.timestamp);
       if (!prev) return;
 
-      // Если уже есть активный сигнальный бар — ждем подтверждения (объем ниже)
+      // Если уже есть активный сигнальный бар — подтверждение только на СЛЕДУЮЩЕЙ свече
       if (currentSignal) {
-        if (candle.volume < currentSignal.candle.volume) {
+        const expectedTs = currentSignal.expectedConfirmTs;
+        if (candle.timestamp > expectedTs) {
+          logger.warn(
+            `⌛ Сигнал протух: ожидали подтверждение на ${new Date(
+              expectedTs
+            ).toLocaleTimeString()}, пришла более поздняя свеча ${new Date(
+              candle.timestamp
+            ).toLocaleTimeString()}`
+          );
+          currentSignal = null;
+        } else if (
+          candle.timestamp === expectedTs &&
+          candle.volume < currentSignal.candle.volume
+        ) {
           // Подтверждение получено — формируем направление и создаем трекер
           const signalCandle = currentSignal.candle;
           // Определяем направление 1-в-1 по логике TradingLogicService (кластеры + OI)
@@ -528,19 +549,34 @@ async function main() {
           // Сбрасываем текущий сигнал — он отработан
           currentSignal = null;
           return;
+        } else if (
+          candle.timestamp === expectedTs &&
+          candle.volume >= currentSignal.candle.volume
+        ) {
+          logger.info(
+            `❌ Подтверждение не выполнено на следующей свече (${new Date(
+              candle.timestamp
+            ).toLocaleTimeString()}), сигнал отменен`
+          );
+          currentSignal = null;
         }
         // Если подтверждение не пришло – просто продолжаем ждать
       }
 
       // Иначе ищем новый сигнальный бар: объем > порога и > предыдущей свечи
       if (candle.volume > volumeThreshold && candle.volume > prev.volume) {
-        currentSignal = { candle };
+        currentSignal = {
+          candle,
+          expectedConfirmTs: candle.timestamp + 60 * 60 * 1000
+        };
         logger.info(
           `📢 Обнаружен сигнальный бар: ${new Date(
             candle.timestamp
           ).toLocaleString()} V=${candle.volume.toFixed(
             2
-          )} (порог=${volumeThreshold})`
+          )} (порог=${volumeThreshold}). Ждем подтверждение на ${new Date(
+            currentSignal.expectedConfirmTs
+          ).toLocaleTimeString()}`
         );
       }
     } catch (error) {
